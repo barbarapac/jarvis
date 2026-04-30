@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
+from typing import Protocol
 
 # IMPORTANTE: importar playsound3 ANTES de qualquer engine TTS que use HTTP/COM
 # (fish_audio_sdk inicializa estado de Windows que conflita com o import tardio
@@ -12,6 +13,22 @@ from pathlib import Path
 from playsound3 import playsound
 
 from core.tts import TTSEngine
+
+
+class SpeakingNarrator(Protocol):
+    def speak(self, text: str) -> None: ...
+
+
+class DryRunNarrator:
+    """Narrator que só imprime — não chama TTS nem toca áudio.
+
+    Uso: testes e desenvolvimento, pra evitar chamadas desnecessárias à API do
+    TTS (que custam créditos e geram tráfego que pode chamar atenção do time
+    de segurança).
+    """
+
+    def speak(self, text: str) -> None:
+        print(f"[narrator dry-run] {text}")
 
 
 class Narrator:

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import httpx
 
-from core.narrator import Narrator
+from core.narrator import SpeakingNarrator
 from core.persona import Persona
 from core.state import WatcherState
 from watchers.base import Watcher
@@ -22,7 +22,7 @@ class GitLabWatcher(Watcher):
         self,
         token: str,
         base_url: str,
-        narrator: Narrator,
+        narrator: SpeakingNarrator,
         persona: Persona,
         state: WatcherState,
         poll_interval_seconds: int = 30,

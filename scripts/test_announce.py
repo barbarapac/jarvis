@@ -1,11 +1,12 @@
 """Roda o GitLab watcher uma única vez com state fresco.
 
-Usa um arquivo de state temporário para forçar o caminho de "primeira execução"
-e ouvir o Jarvis anunciando um todo real. Não toca no state real.
+Por padrão, NÃO chama a fish.audio — apenas imprime o que seria falado.
+Use --speak pra ouvir de verdade.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 import tempfile
@@ -25,41 +26,61 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from core.narrator import Narrator
+from core.narrator import DryRunNarrator, Narrator
 from core.persona import Persona
 from core.state import WatcherState
 from core.tts import build_engine
 from watchers.gitlab import GitLabWatcher
 
-load_dotenv(ROOT / ".env")
 
-with (ROOT / "config" / "jarvis.yaml").open(encoding="utf-8") as f:
-    config = yaml.safe_load(f)
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--speak",
+        action="store_true",
+        help="Realmente chama o TTS e toca o áudio (default: dry-run, só imprime).",
+    )
+    args = parser.parse_args()
 
-persona = Persona(
-    user_name=config["user"]["name"],
-    honorific=config["user"]["honorific"],
-)
-narrator = Narrator(
-    engine=build_engine(config),
-    volume=float(config["narrator"]["volume"]),
-)
+    load_dotenv(ROOT / ".env")
+    with (ROOT / "config" / "jarvis.yaml").open(encoding="utf-8") as f:
+        config = yaml.safe_load(f)
 
-# State temporário pra forçar primeira execução (path inexistente).
-tmp = Path(tempfile.gettempdir()) / "jarvis_test_state.json"
-if tmp.exists():
-    tmp.unlink()
-state = WatcherState(tmp)
+    persona = Persona(
+        user_name=config["user"]["name"],
+        honorific=config["user"]["honorific"],
+    )
 
-watcher = GitLabWatcher(
-    token=os.environ["GITLAB_TOKEN"],
-    base_url=os.environ.get("GITLAB_URL", "https://gitlab.com"),
-    narrator=narrator,
-    persona=persona,
-    state=state,
-    poll_interval_seconds=0,
-)
+    if args.speak:
+        narrator: Narrator | DryRunNarrator = Narrator(
+            engine=build_engine(config),
+            volume=float(config["narrator"]["volume"]),
+        )
+        print("[test] modo --speak: vai chamar TTS de verdade.")
+    else:
+        narrator = DryRunNarrator()
+        print("[test] dry-run: TTS desativado. Use --speak pra ouvir.")
 
-print("[test] executando um poll com state fresco...")
-watcher.poll()
-print("[test] feito.")
+    # State temporário pra forçar primeira execução (path inexistente).
+    tmp = Path(tempfile.gettempdir()) / "jarvis_test_state.json"
+    if tmp.exists():
+        tmp.unlink()
+    state = WatcherState(tmp)
+
+    watcher = GitLabWatcher(
+        token=os.environ["GITLAB_TOKEN"],
+        base_url=os.environ.get("GITLAB_URL", "https://gitlab.com"),
+        narrator=narrator,
+        persona=persona,
+        state=state,
+        poll_interval_seconds=0,
+    )
+
+    print("[test] executando um poll com state fresco...")
+    watcher.poll()
+    print("[test] feito.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
