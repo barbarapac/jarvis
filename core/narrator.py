@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
 from pathlib import Path
 from typing import Protocol
 
@@ -43,11 +44,14 @@ class Narrator:
         self._cache_dir = cache_dir
         if cache_dir is not None:
             cache_dir.mkdir(parents=True, exist_ok=True)
+        # Serializa speak() entre threads (watcher, code_review, etc.).
+        self._lock = threading.Lock()
 
     def speak(self, text: str) -> None:
-        """Sintetiza e toca em modo bloqueante."""
-        result = self._engine.synthesize(text)
-        self._play(result.audio, result.format)
+        """Sintetiza e toca em modo bloqueante. Thread-safe."""
+        with self._lock:
+            result = self._engine.synthesize(text)
+            self._play(result.audio, result.format)
 
     def _play(self, audio_bytes: bytes, fmt: str) -> None:
         suffix = f".{fmt}"

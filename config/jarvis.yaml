@@ -22,5 +22,15 @@ tools:
   spotify:
     enabled: false
   code_review:
-    enabled: false
-    skill: "code-review:code-review"
+    enabled: true
+    dry_run: true  # true = apenas imprime o comando, não executa. Mude pra false quando quiser rodar de verdade.
+    # Mapa: projeto GitLab (path_with_namespace) → diretório local com clone
+    project_dirs: {}
+    # Exemplo:
+    # project_dirs:
+    #   "softplan/justica/projeto-x": "C:/Users/barbara.pacheco/projects/projeto-x"
+    command: ["claude", "-p", "/hp:review branch:{source_branch}"]
+
+stt:
+  # Modelo Vosk PT-BR. Precisa ter sido baixado via `py scripts/setup_stt.py`.
+  model_dir: ".jarvis_state/vosk_model_pt"

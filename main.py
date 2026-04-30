@@ -21,7 +21,9 @@ from dotenv import load_dotenv
 from core.narrator import Narrator
 from core.persona import Persona
 from core.state import WatcherState
+from core.stt import VoskSTT
 from core.tts import build_engine
+from tools.code_review import CodeReviewTool
 from watchers.base import Watcher
 from watchers.gitlab import GitLabWatcher
 
@@ -46,11 +48,39 @@ def build_persona(config: dict) -> Persona:
     )
 
 
+def build_stt(config: dict) -> VoskSTT | None:
+    stt_cfg = config.get("stt", {}) or {}
+    model_dir_str = stt_cfg.get("model_dir")
+    if not model_dir_str:
+        return None
+    model_dir = ROOT / model_dir_str if not Path(model_dir_str).is_absolute() else Path(model_dir_str)
+    if not model_dir.is_dir():
+        print(f"[jarvis] modelo Vosk ausente em {model_dir} — STT desativado.", file=sys.stderr)
+        print(f"[jarvis] rode `py scripts/setup_stt.py` pra baixá-lo.", file=sys.stderr)
+        return None
+    return VoskSTT(model_dir)
+
+
+def build_code_review(config: dict, narrator: Narrator, persona: Persona) -> CodeReviewTool | None:
+    cfg = (config.get("tools") or {}).get("code_review") or {}
+    if not cfg.get("enabled"):
+        return None
+    return CodeReviewTool(
+        project_dirs=cfg.get("project_dirs") or {},
+        command_template=cfg.get("command") or ["claude", "-p", "/hp:review branch:{source_branch}"],
+        narrator=narrator,
+        persona=persona,
+        dry_run=bool(cfg.get("dry_run", True)),
+    )
+
+
 def build_watchers(
     config: dict,
     narrator: Narrator,
     persona: Persona,
     state: WatcherState,
+    stt: VoskSTT | None,
+    code_review: CodeReviewTool | None,
 ) -> list[Watcher]:
     watchers: list[Watcher] = []
     cfg = config.get("watchers", {}) or {}
@@ -68,6 +98,8 @@ def build_watchers(
                     persona=persona,
                     state=state,
                     poll_interval_seconds=int(gitlab_cfg.get("poll_interval_seconds", 30)),
+                    stt=stt,
+                    code_review=code_review,
                 )
             )
         except ValueError as e:
@@ -92,10 +124,19 @@ def main() -> int:
         volume=float(config.get("narrator", {}).get("volume", 0.9)),
     )
     state = WatcherState(STATE_PATH)
-    watchers = build_watchers(config, narrator, persona, state)
+    stt = build_stt(config)
+    code_review = build_code_review(config, narrator, persona)
+    watchers = build_watchers(config, narrator, persona, state, stt, code_review)
 
     boot = persona.boot_phrase()
     print(f"[jarvis] ({engine.name}) {boot}")
+    capabilities = []
+    if stt:
+        capabilities.append("STT")
+    if code_review:
+        capabilities.append("code review" + (" (dry-run)" if code_review.dry_run else ""))
+    if capabilities:
+        print(f"[jarvis] capacidades: {', '.join(capabilities)}")
     narrator.speak(boot)
 
     if not watchers:
