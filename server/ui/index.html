@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>JARVIS</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="reactor" id="reactor">
+        <div class="reactor-core"></div>
+        <div class="reactor-ring reactor-ring-1"></div>
+        <div class="reactor-ring reactor-ring-2"></div>
+        <div class="reactor-ring reactor-ring-3"></div>
+      </div>
+      <div class="title">
+        <h1>JARVIS</h1>
+        <span class="status" id="status">conectando...</span>
+      </div>
+    </header>
+
+    <main class="transcript" id="transcript">
+      <div class="entry entry-system">
+        <span class="badge">SISTEMA</span>
+        <span class="text">Aguardando inicialização.</span>
+      </div>
+    </main>
+
+    <footer class="composer">
+      <input
+        type="text"
+        id="input"
+        autocomplete="off"
+        placeholder="diga algo, Senhora Bárbara..."
+      />
+      <button id="send" type="button">▶</button>
+    </footer>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

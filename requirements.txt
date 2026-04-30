@@ -8,3 +8,5 @@ numpy>=2.0
 vosk>=0.3.45
 spotipy>=2.26.0
 pynput>=1.8.0
+fastapi>=0.115
+uvicorn[standard]>=0.32

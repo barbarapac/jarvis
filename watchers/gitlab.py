@@ -15,6 +15,7 @@ from __future__ import annotations
 import httpx
 
 from core.audio_recorder import record_with_vad
+from core.event_bus import EventBus, EventType
 from core.intent import YesNo, parse_yes_no
 from core.narrator import SpeakingNarrator
 from core.persona import Persona
@@ -39,6 +40,7 @@ class GitLabWatcher(Watcher):
         poll_interval_seconds: int = 30,
         stt: VoskSTT | None = None,
         code_review: CodeReviewTool | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         super().__init__(poll_interval_seconds)
         if not token:
@@ -50,6 +52,7 @@ class GitLabWatcher(Watcher):
         self._state = state
         self._stt = stt
         self._code_review = code_review
+        self._event_bus = event_bus
         self._client = httpx.Client(
             base_url=self._base_url,
             headers={"PRIVATE-TOKEN": token},
@@ -116,6 +119,7 @@ class GitLabWatcher(Watcher):
         web_url = todo.get("target_url", "")
         if web_url:
             print(f"         {web_url}")
+        self._publish_announce(todo, combined, prompt=True)
         self._narrator.speak(combined)
 
     def _announce(self, todo: dict) -> None:
@@ -124,7 +128,20 @@ class GitLabWatcher(Watcher):
         web_url = todo.get("target_url", "")
         if web_url:
             print(f"         {web_url}")
+        self._publish_announce(todo, phrase, prompt=False)
         self._narrator.speak(phrase)
+
+    def _publish_announce(self, todo: dict, text: str, *, prompt: bool) -> None:
+        if not self._event_bus:
+            return
+        self._event_bus.publish(
+            EventType.GITLAB_ANNOUNCE,
+            text=text,
+            prompt=prompt,
+            url=todo.get("target_url", ""),
+            action=todo.get("action_name", ""),
+            project=(todo.get("project") or {}).get("path_with_namespace", ""),
+        )
 
     def _build_announcement(self, todo: dict) -> str:
         action = todo.get("action_name", "")

@@ -18,6 +18,12 @@ watchers:
     enabled: true
     poll_interval_seconds: 1000
 
+ui:
+  enabled: true
+  host: "127.0.0.1"
+  port: 8765
+  auto_open: true  # abre Edge --app no boot
+
 hotkey:
   push_to_talk: "<ctrl>+<alt>+j"
 

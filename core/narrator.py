@@ -13,6 +13,7 @@ from typing import Protocol
 # do playsound3 e causa crash 0xE0000067).
 from playsound3 import playsound
 
+from core.event_bus import EventBus, EventType
 from core.tts import TTSEngine
 
 
@@ -38,6 +39,7 @@ class Narrator:
         engine: TTSEngine,
         volume: float = 0.9,
         cache_dir: Path | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self._engine = engine
         self._volume = max(0.0, min(1.0, volume))
@@ -46,12 +48,19 @@ class Narrator:
             cache_dir.mkdir(parents=True, exist_ok=True)
         # Serializa speak() entre threads (watcher, code_review, etc.).
         self._lock = threading.Lock()
+        self._event_bus = event_bus
 
     def speak(self, text: str) -> None:
         """Sintetiza e toca em modo bloqueante. Thread-safe."""
         with self._lock:
-            result = self._engine.synthesize(text)
-            self._play(result.audio, result.format)
+            if self._event_bus:
+                self._event_bus.publish(EventType.SPEAKING_STARTED, text=text)
+            try:
+                result = self._engine.synthesize(text)
+                self._play(result.audio, result.format)
+            finally:
+                if self._event_bus:
+                    self._event_bus.publish(EventType.SPEAKING_ENDED, text=text)
 
     def _play(self, audio_bytes: bytes, fmt: str) -> None:
         suffix = f".{fmt}"

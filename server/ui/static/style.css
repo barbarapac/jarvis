@@ -1,0 +1,252 @@
+/* JARVIS UI — Iron Man inspired (dark navy + cyan + gold accents) */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg-0: #050810;
+  --bg-1: #0a0e18;
+  --bg-2: #11172a;
+  --line: #1a2238;
+  --text: #e8eaed;
+  --muted: #7a8aa0;
+  --reactor: #00d4ff;
+  --reactor-glow: #00d4ff;
+  --gold: #f5c453;
+  --red: #d62828;
+}
+
+html, body {
+  height: 100%;
+  background: radial-gradient(ellipse at top, #0e1427 0%, var(--bg-0) 60%);
+  color: var(--text);
+  font-family: "Segoe UI", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  overflow: hidden;
+}
+
+.app {
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  border: 1px solid var(--line);
+}
+
+/* ====== Header / Reactor ====== */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--bg-2) 0%, transparent 100%);
+}
+
+.reactor {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.reactor-core {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 30%, var(--reactor) 70%);
+  box-shadow:
+    0 0 12px var(--reactor-glow),
+    0 0 24px var(--reactor-glow);
+  animation: corePulse 2s ease-in-out infinite;
+}
+
+.reactor-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid var(--reactor);
+  opacity: 0.6;
+}
+
+.reactor-ring-1 {
+  width: 32px;
+  height: 32px;
+  box-shadow: 0 0 8px var(--reactor-glow) inset;
+}
+
+.reactor-ring-2 {
+  width: 44px;
+  height: 44px;
+  border-style: dashed;
+  border-width: 1px;
+  animation: ringSpin 8s linear infinite;
+}
+
+.reactor-ring-3 {
+  width: 56px;
+  height: 56px;
+  border-color: rgba(0, 212, 255, 0.3);
+  animation: ringSpin 16s linear infinite reverse;
+}
+
+@keyframes corePulse {
+  0%, 100% { box-shadow: 0 0 12px var(--reactor-glow), 0 0 24px var(--reactor-glow); }
+  50%      { box-shadow: 0 0 18px var(--reactor-glow), 0 0 36px var(--reactor-glow); }
+}
+
+@keyframes ringSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Estados do reator */
+.reactor.listening .reactor-core { animation-duration: 0.6s; }
+.reactor.speaking  .reactor-core { background: radial-gradient(circle, #fff 30%, var(--gold) 70%); box-shadow: 0 0 14px var(--gold), 0 0 30px var(--gold); }
+.reactor.working   .reactor-core { background: radial-gradient(circle, #fff 30%, var(--red) 70%); box-shadow: 0 0 14px var(--red), 0 0 30px var(--red); }
+
+.title h1 {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  color: var(--text);
+  text-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
+}
+
+.title .status {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+/* ====== Transcript ====== */
+
+.transcript {
+  padding: 16px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.transcript::-webkit-scrollbar { width: 6px; }
+.transcript::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+
+.entry {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-1);
+  border-left: 2px solid var(--line);
+  animation: slideIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.entry .badge {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--bg-2);
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.entry .text {
+  line-height: 1.5;
+  word-break: break-word;
+  flex: 1;
+}
+
+.entry .url {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+  text-decoration: none;
+}
+
+.entry .url:hover { color: var(--reactor); }
+
+.entry-jarvis    { border-left-color: var(--reactor); }
+.entry-jarvis    .badge { color: var(--reactor); }
+.entry-user      { border-left-color: var(--gold); }
+.entry-user      .badge { color: var(--gold); }
+.entry-gitlab    { border-left-color: #fc6d26; }
+.entry-gitlab    .badge { color: #fc6d26; }
+.entry-system    { border-left-color: var(--muted); }
+.entry-error     { border-left-color: var(--red); }
+.entry-error     .badge { color: var(--red); }
+
+/* ====== Composer ====== */
+
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-1);
+}
+
+.composer input {
+  flex: 1;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 14px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.composer input:focus {
+  border-color: var(--reactor);
+  box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.2);
+}
+
+.composer input::placeholder {
+  color: var(--muted);
+}
+
+.composer button {
+  background: var(--reactor);
+  color: var(--bg-0);
+  border: none;
+  border-radius: 6px;
+  padding: 0 18px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.15s;
+  min-width: 48px;
+}
+
+.composer button:hover {
+  box-shadow: 0 0 12px var(--reactor-glow);
+}
+
+.composer button:active {
+  transform: scale(0.96);
+}
+
+.composer button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

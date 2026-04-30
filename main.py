@@ -1,9 +1,11 @@
-"""Entry point do Jarvis. Boot + event loop com watchers habilitados."""
+"""Entry point do Jarvis. Boot + event loop + UI server + watchers + hotkey."""
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -15,17 +17,21 @@ if sys.platform == "win32":
     except AttributeError:
         pass
 
+import uvicorn
 import yaml
 from dotenv import load_dotenv
 
+from core.event_bus import EventBus, EventType
+from core.hotkey import HotkeyListener
 from core.narrator import Narrator
 from core.persona import Persona
 from core.state import WatcherState
 from core.stt import VoskSTT
 from core.tts import build_engine
-from core.hotkey import HotkeyListener
+from core.ui_launcher import launch_app_window
 from core.voice_command import VoiceCommander
 from core.workspace import WorkspaceManager
+from server.app import create_app
 from tools.code_review import CodeReviewTool, project_configs_from_yaml
 from tools.spotify import SpotifyTool
 from watchers.base import Watcher
@@ -35,7 +41,6 @@ ROOT = Path(__file__).parent
 CONFIG_PATH = ROOT / "config" / "jarvis.yaml"
 STATE_PATH = ROOT / ".jarvis_state" / "watchers.json"
 
-# Cadência do event loop. Watchers individuais respeitam seu próprio poll_interval.
 LOOP_TICK_SECONDS = 1.0
 
 
@@ -132,6 +137,7 @@ def build_watchers(
     state: WatcherState,
     stt: VoskSTT | None,
     code_review: CodeReviewTool | None,
+    event_bus: EventBus,
 ) -> list[Watcher]:
     watchers: list[Watcher] = []
     cfg = config.get("watchers", {}) or {}
@@ -151,6 +157,7 @@ def build_watchers(
                     poll_interval_seconds=int(gitlab_cfg.get("poll_interval_seconds", 30)),
                     stt=stt,
                     code_review=code_review,
+                    event_bus=event_bus,
                 )
             )
         except ValueError as e:
@@ -159,10 +166,43 @@ def build_watchers(
     return watchers
 
 
+def start_ui_server(
+    config: dict,
+    event_bus: EventBus,
+    text_handler,
+) -> tuple[threading.Thread, uvicorn.Server, str] | None:
+    ui_cfg = config.get("ui") or {}
+    if not ui_cfg.get("enabled", True):
+        return None
+
+    host = ui_cfg.get("host", "127.0.0.1")
+    port = int(ui_cfg.get("port", 8765))
+    app = create_app(event_bus=event_bus, text_handler=text_handler)
+    server_config = uvicorn.Config(
+        app, host=host, port=port, log_level="warning", access_log=False
+    )
+    server = uvicorn.Server(server_config)
+
+    def run() -> None:
+        asyncio.run(server.serve())
+
+    t = threading.Thread(target=run, daemon=True, name="ui-server")
+    t.start()
+
+    # Espera o server subir antes de retornar.
+    deadline = time.monotonic() + 5.0
+    while not server.started and time.monotonic() < deadline:
+        time.sleep(0.05)
+
+    url = f"http://{host}:{port}"
+    return t, server, url
+
+
 def main() -> int:
     load_dotenv(ROOT / ".env")
     config = load_config()
     persona = build_persona(config)
+    event_bus = EventBus()
 
     try:
         engine = build_engine(config)
@@ -173,34 +213,46 @@ def main() -> int:
     narrator = Narrator(
         engine=engine,
         volume=float(config.get("narrator", {}).get("volume", 0.9)),
+        event_bus=event_bus,
     )
     state = WatcherState(STATE_PATH)
     stt = build_stt(config)
     workspace = build_workspace(config)
     code_review = build_code_review(config, narrator, persona, workspace)
     spotify = build_spotify(config)
-    watchers = build_watchers(config, narrator, persona, state, stt, code_review)
+    watchers = build_watchers(config, narrator, persona, state, stt, code_review, event_bus)
 
-    # Push-to-talk: requer STT. Tools controlados por voz são opcionais (Spotify por enquanto).
+    commander: VoiceCommander | None = None
     hotkey_listener: HotkeyListener | None = None
     if stt is not None:
-        commander = VoiceCommander(stt=stt, narrator=narrator, persona=persona, spotify=spotify)
+        commander = VoiceCommander(
+            stt=stt, narrator=narrator, persona=persona,
+            spotify=spotify, event_bus=event_bus,
+        )
         combo = (config.get("hotkey") or {}).get("push_to_talk", "<ctrl>+<alt>+j")
         hotkey_listener = HotkeyListener(combo=combo, callback=commander.on_hotkey)
+
+    # Sobe servidor UI antes do boot phrase pra UI capturar o evento.
+    ui = start_ui_server(
+        config, event_bus,
+        text_handler=(commander.handle_text if commander else lambda _t: None),
+    )
 
     boot = persona.boot_phrase()
     print(f"[jarvis] ({engine.name}) {boot}")
     capabilities = []
-    if stt:
-        capabilities.append("STT")
-    if code_review:
-        capabilities.append("code review" + (" (dry-run)" if code_review.dry_run else ""))
-    if spotify:
-        capabilities.append("spotify")
-    if hotkey_listener:
-        capabilities.append(f"push-to-talk ({hotkey_listener.combo})")
+    if stt: capabilities.append("STT")
+    if code_review: capabilities.append("code review" + (" (dry-run)" if code_review.dry_run else ""))
+    if spotify: capabilities.append("spotify")
+    if hotkey_listener: capabilities.append(f"push-to-talk ({hotkey_listener.combo})")
+    if ui: capabilities.append(f"UI ({ui[2]})")
     if capabilities:
         print(f"[jarvis] capacidades: {', '.join(capabilities)}")
+
+    if ui and (config.get("ui") or {}).get("auto_open", True):
+        launch_app_window(ui[2])
+
+    event_bus.publish(EventType.BOOTED, capabilities=capabilities)
     narrator.speak(boot)
 
     if hotkey_listener is not None:
@@ -219,6 +271,8 @@ def main() -> int:
         print("\n[jarvis] Encerrando...")
         if hotkey_listener is not None:
             hotkey_listener.stop()
+        if ui is not None:
+            ui[1].should_exit = True
         narrator.speak(persona.shutdown_phrase())
         return 0
 

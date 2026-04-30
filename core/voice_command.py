@@ -13,6 +13,7 @@ import threading
 from typing import Optional
 
 from core.audio_recorder import record_with_vad
+from core.event_bus import EventBus, EventType
 from core.narrator import SpeakingNarrator
 from core.persona import Persona
 from core.stt import VoskSTT
@@ -45,13 +46,31 @@ class VoiceCommander:
         narrator: SpeakingNarrator,
         persona: Persona,
         spotify: Optional[SpotifyTool] = None,
+        event_bus: Optional[EventBus] = None,
     ) -> None:
         self._stt = stt
         self._narrator = narrator
         self._persona = persona
         self._spotify = spotify
+        self._event_bus = event_bus
         # Garante que só um comando seja processado por vez.
         self._busy_lock = threading.Lock()
+
+    def handle_text(self, text: str) -> None:
+        """Entry point pra comandos vindos da UI (texto digitado)."""
+        if self._event_bus:
+            self._event_bus.publish(EventType.USER_TEXT_INPUT, text=text)
+        if not text.strip():
+            return
+        if not self._busy_lock.acquire(blocking=False):
+            return
+        try:
+            if not self._dispatch(text.lower()):
+                self._narrator.speak(
+                    f"Comando não reconhecido, {self._persona.honorific}."
+                )
+        finally:
+            self._busy_lock.release()
 
     def on_hotkey(self) -> None:
         """Callback do HotkeyListener. Pula se já estiver processando outro."""
@@ -66,9 +85,15 @@ class VoiceCommander:
     def _capture_and_dispatch(self) -> None:
         self._beep()
         print("[voice] ouvindo...")
+        if self._event_bus:
+            self._event_bus.publish(EventType.LISTENING_STARTED)
         audio = record_with_vad(max_duration_seconds=COMMAND_MAX_DURATION_SECONDS)
+        if self._event_bus:
+            self._event_bus.publish(EventType.LISTENING_ENDED)
         text = self._stt.transcribe(audio)
         print(f"[voice] transcrição: {text!r}")
+        if self._event_bus:
+            self._event_bus.publish(EventType.USER_VOICE_TRANSCRIBED, text=text)
 
         if not text:
             self._narrator.speak(f"Não captei, {self._persona.honorific}.")
