@@ -1,25 +1,34 @@
-"""Servidor FastAPI com WebSocket pra UI ao vivo.
+"""Servidor FastAPI com WebSocket pra UI ao vivo + APIs REST.
 
-- GET  /              → index.html
-- GET  /static/*      → assets estáticos
-- WS   /ws            → stream de eventos (Event do EventBus → JSON)
-- POST /api/command   → comando texto da UI (chama VoiceCommander.handle_text)
+Rotas:
+- GET  /                 → index.html
+- GET  /static/*         → assets estáticos
+- WS   /ws               → stream de eventos do EventBus
+- POST /api/command      → comando texto da UI
+- POST /api/voice        → áudio PCM 16kHz int16 da UI
+- GET  /api/config       → dump do config/jarvis.yaml
+- PATCH /api/config      → merge parcial no config (alguns campos exigem restart)
+- GET  /api/mcps         → lista de servidores MCP + status
+- PUT  /api/mcps         → substitui a lista inteira de MCPs
+- POST /api/mcps/reload  → reconecta os servidores
+- GET  /api/status       → flags de capabilities (stt/agent/wake_word/etc.)
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import asdict
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from core.config_manager import ConfigManager
 from core.event_bus import Event, EventBus, EventType
+from core.mcp_manager import MCPManager, MCPServerConfig
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
 
@@ -28,9 +37,26 @@ class CommandIn(BaseModel):
     text: str
 
 
+class MCPServerIn(BaseModel):
+    name: str
+    command: str
+    args: list[str] = []
+    env: dict[str, str] = {}
+    enabled: bool = True
+
+
+class MCPListIn(BaseModel):
+    servers: list[MCPServerIn]
+
+
 def create_app(
+    *,
     event_bus: EventBus,
     text_handler: Callable[[str], None],
+    audio_handler: Callable[[bytes], None] | None = None,
+    config_manager: ConfigManager | None = None,
+    mcp_manager: MCPManager | None = None,
+    capabilities_provider: Callable[[], dict[str, Any]] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Jarvis")
 
@@ -42,9 +68,77 @@ def create_app(
 
     @app.post("/api/command")
     async def post_command(cmd: CommandIn) -> dict:
-        # Roda o handler em thread separada pra não bloquear o event loop async.
         await asyncio.to_thread(text_handler, cmd.text)
         return {"ok": True}
+
+    @app.post("/api/voice")
+    async def post_voice(request: Request) -> dict:
+        if audio_handler is None:
+            raise HTTPException(status_code=503, detail="STT indisponível")
+        # Recebe PCM bruto (mono 16kHz int16) no body — tipo fixo, sem multipart.
+        body = await request.body()
+        if not body:
+            raise HTTPException(status_code=400, detail="payload vazio")
+        await asyncio.to_thread(audio_handler, body)
+        return {"ok": True, "bytes": len(body)}
+
+    # ---------- Config ----------
+
+    @app.get("/api/config")
+    async def get_config() -> dict:
+        if config_manager is None:
+            raise HTTPException(status_code=503, detail="config indisponível")
+        return await asyncio.to_thread(config_manager.load)
+
+    @app.patch("/api/config")
+    async def patch_config(payload: dict[str, Any]) -> dict:
+        if config_manager is None:
+            raise HTTPException(status_code=503, detail="config indisponível")
+        updated = await asyncio.to_thread(config_manager.patch, payload)
+        return updated
+
+    # ---------- MCPs ----------
+
+    @app.get("/api/mcps")
+    async def list_mcps() -> dict:
+        if mcp_manager is None:
+            return {"servers": [], "available": False}
+        return {"servers": mcp_manager.list_status(), "available": True}
+
+    @app.put("/api/mcps")
+    async def put_mcps(payload: MCPListIn) -> dict:
+        if mcp_manager is None:
+            raise HTTPException(status_code=503, detail="MCP manager indisponível")
+        configs = [
+            MCPServerConfig(
+                name=s.name,
+                command=s.command,
+                args=list(s.args),
+                env=dict(s.env),
+                enabled=s.enabled,
+            )
+            for s in payload.servers
+        ]
+        await asyncio.to_thread(mcp_manager.save_configs, configs)
+        statuses = await asyncio.to_thread(mcp_manager.reload)
+        return {"ok": True, "statuses": statuses, "servers": mcp_manager.list_status()}
+
+    @app.post("/api/mcps/reload")
+    async def reload_mcps() -> dict:
+        if mcp_manager is None:
+            raise HTTPException(status_code=503, detail="MCP manager indisponível")
+        statuses = await asyncio.to_thread(mcp_manager.reload)
+        return {"ok": True, "statuses": statuses, "servers": mcp_manager.list_status()}
+
+    # ---------- Status ----------
+
+    @app.get("/api/status")
+    async def status() -> dict:
+        if capabilities_provider is None:
+            return {"capabilities": {}}
+        return await asyncio.to_thread(capabilities_provider)
+
+    # ---------- WebSocket ----------
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket) -> None:
@@ -53,11 +147,9 @@ def create_app(
         queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=200)
 
         def on_event(event: Event) -> None:
-            # EventBus chama isso de threads diversas; agendamos no loop async.
             loop.call_soon_threadsafe(_safe_put, queue, event)
 
         event_bus.subscribe(on_event)
-        # Boas-vindas: avisa cliente que conectou.
         await websocket.send_json(
             _serialize(Event(type=EventType.STATUS, data={"state": "idle"}))
         )
@@ -78,7 +170,6 @@ def _safe_put(queue: "asyncio.Queue[Event]", event: Event) -> None:
     try:
         queue.put_nowait(event)
     except asyncio.QueueFull:
-        # Drop oldest, put new — UI não precisa de tudo histórico.
         try:
             queue.get_nowait()
         except asyncio.QueueEmpty:

@@ -1,12 +1,30 @@
 "use strict";
 
+/* ============================================================
+   JARVIS UI — controlador da SPA.
+   Views: home / history / tools / settings.
+   ============================================================ */
+
+// ---------- Refs principais ----------
 const transcript = document.getElementById("transcript");
-const statusEl = document.getElementById("status");
-const reactorEl = document.getElementById("reactor");
+const brandStatus = document.getElementById("brandStatus");
+const bigReactor = document.getElementById("bigReactor");
+const lastLine = document.getElementById("lastLine");
 const inputEl = document.getElementById("input");
-const sendEl = document.getElementById("send");
+const composer = document.getElementById("composer");
+const micBtn = document.getElementById("micBtn");
+const capList = document.getElementById("capList");
+
+const cfgSaveBtn = document.getElementById("cfgSave");
+const cfgReloadBtn = document.getElementById("cfgReload");
+const cfgHint = document.getElementById("cfgHint");
+
+const mcpList = document.getElementById("mcpList");
+const mcpAddBtn = document.getElementById("mcpAdd");
+const mcpReloadBtn = document.getElementById("mcpReload");
 
 const MAX_ENTRIES = 200;
+const TARGET_RATE = 16000; // taxa que Vosk espera
 
 const STATUS_LABELS = {
   idle: "online",
@@ -15,11 +33,41 @@ const STATUS_LABELS = {
   working: "executando...",
 };
 
+// ---------- State ----------
+let currentConfig = null;
+let micRecorder = null;
+
+// ============================================================
+//                      Roteamento de abas
+// ============================================================
+
+document.querySelectorAll(".nav-item").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const view = btn.dataset.view;
+    document.querySelectorAll(".nav-item").forEach((n) => n.classList.toggle("active", n === btn));
+    document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.dataset.view === view));
+    if (view === "settings") loadConfig();
+    if (view === "tools") loadMcps();
+  });
+});
+
+// ============================================================
+//                       Reator / status
+// ============================================================
+
 function setStatus(state) {
-  statusEl.textContent = STATUS_LABELS[state] || state;
-  reactorEl.classList.remove("listening", "speaking", "working");
-  if (state !== "idle") reactorEl.classList.add(state);
+  brandStatus.textContent = STATUS_LABELS[state] || state;
+  bigReactor.classList.remove("listening", "speaking", "working");
+  if (state && state !== "idle") bigReactor.classList.add(state);
 }
+
+function setLastLine(text) {
+  lastLine.textContent = text || "";
+}
+
+// ============================================================
+//                       Histórico
+// ============================================================
 
 function addEntry({ kind, badge, text, url }) {
   const div = document.createElement("div");
@@ -42,61 +90,45 @@ function addEntry({ kind, badge, text, url }) {
   div.appendChild(badgeSpan);
   div.appendChild(textSpan);
   transcript.appendChild(div);
-
   while (transcript.children.length > MAX_ENTRIES) {
     transcript.removeChild(transcript.firstChild);
   }
   transcript.scrollTop = transcript.scrollHeight;
 }
 
+// ============================================================
+//                   WebSocket / eventos
+// ============================================================
+
 function handleEvent(evt) {
   const { type, data } = evt;
-
   switch (type) {
     case "status":
       setStatus(data.state);
       break;
-
     case "speaking_started":
       setStatus("speaking");
+      setLastLine(data.text || "");
       addEntry({ kind: "jarvis", badge: "JARVIS", text: data.text || "" });
       break;
-
     case "speaking_ended":
       setStatus("idle");
       break;
-
     case "listening_started":
       setStatus("listening");
       break;
-
     case "listening_ended":
       setStatus("idle");
       break;
-
     case "user_voice_transcribed":
-      if (data.text) {
-        addEntry({ kind: "user", badge: "VOCÊ", text: data.text });
-      }
+      if (data.text) addEntry({ kind: "user", badge: "VOCÊ", text: data.text });
       break;
-
     case "user_text_input":
       addEntry({ kind: "user", badge: "VOCÊ", text: data.text });
       break;
-
     case "gitlab_announce":
-      addEntry({
-        kind: "gitlab",
-        badge: "GITLAB",
-        text: data.text,
-        url: data.url,
-      });
+      addEntry({ kind: "gitlab", badge: "GITLAB", text: data.text, url: data.url });
       break;
-
-    case "command_dispatched":
-      // já capturado via speaking events; aqui é só log
-      break;
-
     case "review_started":
       setStatus("working");
       addEntry({
@@ -105,7 +137,6 @@ function handleEvent(evt) {
         text: `Iniciando revisão ${data.review_type || ""} em ${data.project || ""}@${data.branch || ""}`,
       });
       break;
-
     case "review_finished":
       setStatus("idle");
       addEntry({
@@ -114,12 +145,31 @@ function handleEvent(evt) {
         text: `Revisão concluída (${data.success ? "ok" : "falhou"})`,
       });
       break;
-
     case "log":
       addEntry({ kind: "system", badge: "LOG", text: data.text || "" });
       break;
   }
 }
+
+function connectWS() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${proto}//${location.host}/ws`);
+  ws.onopen = () => setStatus("idle");
+  ws.onmessage = (msg) => {
+    try { handleEvent(JSON.parse(msg.data)); }
+    catch (e) { console.error("evento inválido", e, msg.data); }
+  };
+  ws.onclose = () => {
+    setStatus("idle");
+    brandStatus.textContent = "desconectado";
+    setTimeout(connectWS, 1500);
+  };
+  ws.onerror = (e) => console.error("ws error", e);
+}
+
+// ============================================================
+//                       Comando texto
+// ============================================================
 
 async function sendCommand(text) {
   if (!text.trim()) return;
@@ -134,40 +184,365 @@ async function sendCommand(text) {
   }
 }
 
-function connectWS() {
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(`${proto}//${location.host}/ws`);
-
-  ws.onopen = () => setStatus("idle");
-  ws.onmessage = (msg) => {
-    try {
-      handleEvent(JSON.parse(msg.data));
-    } catch (e) {
-      console.error("evento inválido", e, msg.data);
-    }
-  };
-  ws.onclose = () => {
-    setStatus("idle");
-    statusEl.textContent = "desconectado — reconectando...";
-    setTimeout(connectWS, 1500);
-  };
-  ws.onerror = (e) => console.error("ws error", e);
-}
-
-sendEl.addEventListener("click", () => {
+composer.addEventListener("submit", (e) => {
+  e.preventDefault();
   const text = inputEl.value;
   inputEl.value = "";
   sendCommand(text);
 });
 
-inputEl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    const text = inputEl.value;
-    inputEl.value = "";
-    sendCommand(text);
+// ============================================================
+//                       Botão de mic
+// ============================================================
+
+class MicRecorder {
+  constructor() {
+    this.stream = null;
+    this.audioCtx = null;
+    this.processor = null;
+    this.source = null;
+    this.chunks = [];
+    this.recording = false;
+  }
+
+  async start() {
+    if (this.recording) return;
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+    });
+    this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    this.source = this.audioCtx.createMediaStreamSource(this.stream);
+
+    // ScriptProcessor é deprecated mas funciona em todos os browsers e
+    // é suficiente pra capturar PCM em chunks.
+    const bufSize = 4096;
+    this.processor = this.audioCtx.createScriptProcessor(bufSize, 1, 1);
+    this.chunks = [];
+    this.processor.onaudioprocess = (e) => {
+      const data = e.inputBuffer.getChannelData(0);
+      this.chunks.push(new Float32Array(data));
+    };
+    this.source.connect(this.processor);
+    this.processor.connect(this.audioCtx.destination);
+    this.recording = true;
+  }
+
+  async stop() {
+    if (!this.recording) return null;
+    this.recording = false;
+    this.processor.disconnect();
+    this.source.disconnect();
+    const sourceRate = this.audioCtx.sampleRate;
+    await this.audioCtx.close();
+    this.stream.getTracks().forEach((t) => t.stop());
+    this.audioCtx = null;
+    this.stream = null;
+
+    // Concatena chunks
+    const totalLen = this.chunks.reduce((a, c) => a + c.length, 0);
+    const merged = new Float32Array(totalLen);
+    let offset = 0;
+    for (const c of this.chunks) {
+      merged.set(c, offset);
+      offset += c.length;
+    }
+    this.chunks = [];
+
+    // Downsample → 16kHz mono → int16 PCM
+    const downsampled = downsample(merged, sourceRate, TARGET_RATE);
+    return floatTo16BitPCM(downsampled);
+  }
+}
+
+function downsample(buffer, fromRate, toRate) {
+  if (fromRate === toRate) return buffer;
+  const ratio = fromRate / toRate;
+  const newLen = Math.round(buffer.length / ratio);
+  const result = new Float32Array(newLen);
+  let offsetResult = 0;
+  let offsetBuffer = 0;
+  while (offsetResult < newLen) {
+    const next = Math.round((offsetResult + 1) * ratio);
+    let accum = 0;
+    let count = 0;
+    for (let i = offsetBuffer; i < next && i < buffer.length; i++) {
+      accum += buffer[i];
+      count++;
+    }
+    result[offsetResult] = count > 0 ? accum / count : 0;
+    offsetResult++;
+    offsetBuffer = next;
+  }
+  return result;
+}
+
+function floatTo16BitPCM(input) {
+  const out = new Int16Array(input.length);
+  for (let i = 0; i < input.length; i++) {
+    const s = Math.max(-1, Math.min(1, input[i]));
+    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  return new Uint8Array(out.buffer);
+}
+
+async function startMic() {
+  try {
+    micRecorder = new MicRecorder();
+    await micRecorder.start();
+    micBtn.classList.add("recording");
+    micBtn.querySelector(".mic-label").textContent = "GRAVANDO...";
+    setStatus("listening");
+  } catch (e) {
+    addEntry({ kind: "error", badge: "MIC", text: `Microfone falhou: ${e.message}` });
+    micRecorder = null;
+  }
+}
+
+async function stopMic() {
+  if (!micRecorder) return;
+  try {
+    const pcm = await micRecorder.stop();
+    micRecorder = null;
+    micBtn.classList.remove("recording");
+    micBtn.querySelector(".mic-label").textContent = "FALAR";
+    if (!pcm || pcm.length < 1600) { // < 0.1s
+      setStatus("idle");
+      return;
+    }
+    setStatus("working");
+    await fetch("/api/voice", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: pcm,
+    });
+  } catch (e) {
+    addEntry({ kind: "error", badge: "MIC", text: `Falha enviando áudio: ${e.message}` });
+  }
+}
+
+// Push-to-talk simples: clica → grava; clica de novo → para.
+micBtn.addEventListener("click", async () => {
+  if (micRecorder) await stopMic();
+  else await startMic();
+});
+
+// ============================================================
+//                    Configurações
+// ============================================================
+
+async function loadConfig() {
+  try {
+    const r = await fetch("/api/config");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    currentConfig = await r.json();
+    fillSettingsForm(currentConfig);
+    cfgHint.textContent = "";
+  } catch (e) {
+    cfgHint.textContent = `Falha lendo config: ${e.message}`;
+  }
+}
+
+function fillSettingsForm(cfg) {
+  document.querySelectorAll("[data-cfg]").forEach((el) => {
+    const path = el.dataset.cfg.split(".");
+    let v = cfg;
+    for (const key of path) v = v == null ? undefined : v[key];
+    if (el.type === "checkbox") el.checked = !!v;
+    else el.value = v == null ? "" : v;
+  });
+}
+
+function readSettingsForm() {
+  const result = {};
+  document.querySelectorAll("[data-cfg]").forEach((el) => {
+    const path = el.dataset.cfg.split(".");
+    let target = result;
+    for (let i = 0; i < path.length - 1; i++) {
+      const k = path[i];
+      target[k] = target[k] || {};
+      target = target[k];
+    }
+    let value;
+    if (el.type === "checkbox") value = el.checked;
+    else if (el.type === "number") value = el.value === "" ? null : Number(el.value);
+    else value = el.value;
+    target[path[path.length - 1]] = value;
+  });
+  return result;
+}
+
+cfgSaveBtn.addEventListener("click", async () => {
+  cfgHint.textContent = "Salvando...";
+  try {
+    const payload = readSettingsForm();
+    const r = await fetch("/api/config", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    currentConfig = await r.json();
+    cfgHint.textContent = "Salvo. Reinicie o Jarvis pra aplicar mudanças marcadas com ↻.";
+  } catch (e) {
+    cfgHint.textContent = `Falha ao salvar: ${e.message}`;
   }
 });
 
+cfgReloadBtn.addEventListener("click", () => loadConfig());
+
+// ============================================================
+//                          MCPs
+// ============================================================
+
+async function loadMcps() {
+  try {
+    const r = await fetch("/api/mcps");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    renderMcps(data.servers || []);
+  } catch (e) {
+    mcpList.innerHTML = `<div class="mcp-empty">Falha lendo MCPs: ${e.message}</div>`;
+  }
+}
+
+function renderMcps(servers) {
+  mcpList.innerHTML = "";
+  if (!servers.length) {
+    mcpList.innerHTML = `<div class="mcp-empty">Nenhum servidor MCP registrado. Adicione abaixo.</div>`;
+    return;
+  }
+  for (const s of servers) {
+    const row = document.createElement("div");
+    let cls = "mcp-row";
+    if (!s.enabled) cls += " disabled";
+    else if (s.connected) cls += " connected";
+    else cls += " error";
+    row.className = cls;
+
+    const cmdLine = `${s.command} ${(s.args || []).join(" ")}`.trim();
+    const toolsText = s.error
+      ? `erro: ${s.error}`
+      : (s.tools && s.tools.length ? `${s.tools.length} tool(s): ${s.tools.join(", ")}` : "sem tools");
+
+    row.innerHTML = `
+      <div class="mcp-info">
+        <div class="mcp-name">${escapeHtml(s.name)}</div>
+        <div class="mcp-cmd">${escapeHtml(cmdLine)}</div>
+        <div class="mcp-tools ${s.error ? "error" : ""}">${escapeHtml(toolsText)}</div>
+      </div>
+      <div class="mcp-actions">
+        <button class="icon-btn" data-action="toggle" data-name="${escapeHtml(s.name)}">${s.enabled ? "Desligar" : "Ligar"}</button>
+        <button class="icon-btn danger" data-action="remove" data-name="${escapeHtml(s.name)}">Remover</button>
+      </div>
+    `;
+    mcpList.appendChild(row);
+  }
+  mcpList.querySelectorAll("button[data-action]").forEach((btn) => {
+    btn.addEventListener("click", () => mcpAction(btn.dataset.action, btn.dataset.name));
+  });
+}
+
+async function mcpAction(action, name) {
+  // Lê a lista atual, modifica, faz PUT.
+  const r = await fetch("/api/mcps");
+  const data = await r.json();
+  let servers = (data.servers || []).map((s) => ({
+    name: s.name, command: s.command, args: s.args, env: {}, enabled: s.enabled,
+  }));
+  if (action === "remove") {
+    servers = servers.filter((s) => s.name !== name);
+  } else if (action === "toggle") {
+    servers = servers.map((s) => s.name === name ? { ...s, enabled: !s.enabled } : s);
+  }
+  await fetch("/api/mcps", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ servers }),
+  });
+  loadMcps();
+}
+
+mcpAddBtn.addEventListener("click", async () => {
+  const name = document.getElementById("mcpName").value.trim();
+  const command = document.getElementById("mcpCommand").value.trim();
+  const argsRaw = document.getElementById("mcpArgs").value.trim();
+  const envRaw = document.getElementById("mcpEnv").value.trim();
+  if (!name || !command) {
+    alert("Nome e comando são obrigatórios.");
+    return;
+  }
+  const args = argsRaw ? argsRaw.split("\n").map((s) => s.trim()).filter(Boolean) : [];
+  const env = {};
+  if (envRaw) {
+    for (const line of envRaw.split("\n")) {
+      const idx = line.indexOf("=");
+      if (idx > 0) env[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+    }
+  }
+
+  const r = await fetch("/api/mcps");
+  const data = await r.json();
+  const existing = (data.servers || []).map((s) => ({
+    name: s.name, command: s.command, args: s.args, env: {}, enabled: s.enabled,
+  }));
+  const merged = [...existing.filter((s) => s.name !== name), { name, command, args, env, enabled: true }];
+
+  await fetch("/api/mcps", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ servers: merged }),
+  });
+
+  document.getElementById("mcpName").value = "";
+  document.getElementById("mcpCommand").value = "";
+  document.getElementById("mcpArgs").value = "";
+  document.getElementById("mcpEnv").value = "";
+  loadMcps();
+});
+
+mcpReloadBtn.addEventListener("click", async () => {
+  await fetch("/api/mcps/reload", { method: "POST" });
+  loadMcps();
+});
+
+// ============================================================
+//                       Capabilities
+// ============================================================
+
+async function loadCapabilities() {
+  try {
+    const r = await fetch("/api/status");
+    if (!r.ok) return;
+    const data = await r.json();
+    const caps = data.capabilities || {};
+    const items = [
+      ["STT", caps.stt],
+      ["Spotify", caps.spotify],
+      ["Code review", caps.code_review],
+      ["Agente Claude", caps.agent],
+      ["Wake word", caps.wake_word],
+    ];
+    capList.innerHTML = items.map(([label, on]) =>
+      `<div class="cap"><span class="dot ${on ? "on" : "off"}"></span>${escapeHtml(label)}</div>`
+    ).join("");
+  } catch (_) { /* silencioso */ }
+}
+
+// ============================================================
+//                        Utils
+// ============================================================
+
+function escapeHtml(s) {
+  if (s == null) return "";
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+// ============================================================
+//                          Boot
+// ============================================================
+
 connectWS();
+loadCapabilities();
 inputEl.focus();

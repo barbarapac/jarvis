@@ -10,36 +10,313 @@
 </head>
 <body>
   <div class="app">
-    <header class="header">
-      <div class="reactor" id="reactor">
-        <div class="reactor-core"></div>
-        <div class="reactor-ring reactor-ring-1"></div>
-        <div class="reactor-ring reactor-ring-2"></div>
-        <div class="reactor-ring reactor-ring-3"></div>
+    <!-- ========== Sidebar ========== -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <div class="brand-text">
+          <div class="brand-name">JARVIS</div>
+          <div class="brand-status" id="brandStatus">conectando...</div>
+        </div>
       </div>
-      <div class="title">
-        <h1>JARVIS</h1>
-        <span class="status" id="status">conectando...</span>
-      </div>
-    </header>
 
-    <main class="transcript" id="transcript">
-      <div class="entry entry-system">
-        <span class="badge">SISTEMA</span>
-        <span class="text">Aguardando inicialização.</span>
-      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-view="home">
+          <span class="nav-icon">◉</span>
+          <span class="nav-label">Home</span>
+        </button>
+        <button class="nav-item" data-view="history">
+          <span class="nav-icon">≡</span>
+          <span class="nav-label">Histórico</span>
+        </button>
+        <button class="nav-item" data-view="tools">
+          <span class="nav-icon">⚙</span>
+          <span class="nav-label">Ferramentas</span>
+        </button>
+        <button class="nav-item" data-view="settings">
+          <span class="nav-icon">⚒</span>
+          <span class="nav-label">Configurações</span>
+        </button>
+      </nav>
+
+      <footer class="sidebar-footer">
+        <div class="cap-list" id="capList"></div>
+      </footer>
+    </aside>
+
+    <!-- ========== Main ========== -->
+    <main class="main">
+
+      <!-- ========== HOME ========== -->
+      <section class="view view-home active" data-view="home">
+        <div class="reactor-stage">
+          <!-- O reator grande, em SVG. O JS adiciona/remove classes pra estados. -->
+          <div class="big-reactor" id="bigReactor">
+            <svg viewBox="0 0 400 400" class="reactor-svg" aria-hidden="true">
+              <defs>
+                <radialGradient id="coreGrad" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stop-color="#ffffff"/>
+                  <stop offset="35%" stop-color="#d6f7ff"/>
+                  <stop offset="70%" stop-color="#00d4ff"/>
+                  <stop offset="100%" stop-color="#003a55"/>
+                </radialGradient>
+                <radialGradient id="haloGrad" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stop-color="rgba(0,212,255,0.55)"/>
+                  <stop offset="60%" stop-color="rgba(0,212,255,0.10)"/>
+                  <stop offset="100%" stop-color="rgba(0,212,255,0)"/>
+                </radialGradient>
+                <filter id="cyanGlow" x="-50%" y="-50%" width="200%" height="200%">
+                  <feGaussianBlur stdDeviation="3" result="b"/>
+                  <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+              </defs>
+
+              <!-- Halo difuso (pulsa) -->
+              <circle cx="200" cy="200" r="190" fill="url(#haloGrad)" class="halo"/>
+
+              <!-- Anel externo metálico -->
+              <circle cx="200" cy="200" r="170" fill="none"
+                      stroke="#2a3a55" stroke-width="6"/>
+              <circle cx="200" cy="200" r="170" fill="none"
+                      stroke="#00d4ff" stroke-width="2"
+                      stroke-dasharray="3 5" filter="url(#cyanGlow)"
+                      class="ring ring-outer"/>
+
+              <!-- Anel mediano (gira) -->
+              <g class="ring ring-mid">
+                <circle cx="200" cy="200" r="135" fill="none"
+                        stroke="#00d4ff" stroke-width="1.5"
+                        stroke-dasharray="14 6" opacity="0.85"
+                        filter="url(#cyanGlow)"/>
+              </g>
+
+              <!-- 10 segmentos triangulares (tipo arc reactor de Tony Stark) -->
+              <g class="segments" filter="url(#cyanGlow)">
+                <!-- Os polígonos formam coroa entre r=70 e r=120 -->
+                <g transform="translate(200,200)">
+                  <g class="seg" style="--i:0"><polygon points="0,-120 12,-72 -12,-72"/></g>
+                  <g class="seg" style="--i:1"><polygon points="0,-120 12,-72 -12,-72" transform="rotate(36)"/></g>
+                  <g class="seg" style="--i:2"><polygon points="0,-120 12,-72 -12,-72" transform="rotate(72)"/></g>
+                  <g class="seg" style="--i:3"><polygon points="0,-120 12,-72 -12,-72" transform="rotate(108)"/></g>
+                  <g class="seg" style="--i:4"><polygon points="0,-120 12,-72 -12,-72" transform="rotate(144)"/></g>
+                  <g class="seg" style="--i:5"><polygon points="0,-120 12,-72 -12,-72" transform="rotate(180)"/></g>
+                  <g class="seg" style="--i:6"><polygon points="0,-120 12,-72 -12,-72" transform="rotate(216)"/></g>
+                  <g class="seg" style="--i:7"><polygon points="0,-120 12,-72 -12,-72" transform="rotate(252)"/></g>
+                  <g class="seg" style="--i:8"><polygon points="0,-120 12,-72 -12,-72" transform="rotate(288)"/></g>
+                  <g class="seg" style="--i:9"><polygon points="0,-120 12,-72 -12,-72" transform="rotate(324)"/></g>
+                </g>
+              </g>
+
+              <!-- Anel interno (gira reverso) -->
+              <g class="ring ring-inner">
+                <circle cx="200" cy="200" r="65" fill="none"
+                        stroke="#00d4ff" stroke-width="1"
+                        stroke-dasharray="2 3" filter="url(#cyanGlow)"/>
+              </g>
+
+              <!-- Núcleo (respira) -->
+              <circle cx="200" cy="200" r="48" fill="url(#coreGrad)"
+                      filter="url(#cyanGlow)" class="core"/>
+              <circle cx="200" cy="200" r="14" fill="#ffffff" class="core-hot"/>
+            </svg>
+          </div>
+
+          <div class="last-line" id="lastLine"></div>
+
+          <div class="home-controls">
+            <button id="micBtn" class="mic-btn" type="button" title="Falar (clique e segure)">
+              <svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true">
+                <path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
+              </svg>
+              <span class="mic-label">FALAR</span>
+            </button>
+          </div>
+
+          <form class="composer" id="composer">
+            <input
+              type="text"
+              id="input"
+              autocomplete="off"
+              placeholder="ou digite, Senhora Bárbara..."
+            />
+            <button id="send" type="submit">▶</button>
+          </form>
+        </div>
+      </section>
+
+      <!-- ========== HISTÓRICO ========== -->
+      <section class="view view-history" data-view="history">
+        <header class="view-header">
+          <h2>Histórico</h2>
+          <p class="view-subtitle">Conversas e eventos recentes.</p>
+        </header>
+        <div class="transcript" id="transcript"></div>
+      </section>
+
+      <!-- ========== FERRAMENTAS / MCPs ========== -->
+      <section class="view view-tools" data-view="tools">
+        <header class="view-header">
+          <h2>Ferramentas (MCPs)</h2>
+          <p class="view-subtitle">
+            Servidores MCP que o Jarvis pode invocar via Claude.
+            Estilo Claude Desktop: <code>command</code>, <code>args</code>, <code>env</code>.
+          </p>
+        </header>
+
+        <div class="mcp-list" id="mcpList"></div>
+
+        <div class="card mcp-add">
+          <h3>Adicionar servidor</h3>
+          <div class="form-grid">
+            <label>Nome
+              <input type="text" id="mcpName" placeholder="ex: filesystem"/>
+            </label>
+            <label>Comando
+              <input type="text" id="mcpCommand" placeholder="ex: npx"/>
+            </label>
+            <label class="full">Args (um por linha)
+              <textarea id="mcpArgs" rows="3" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;C:\\Users\\barbara.pacheco\\Documents"></textarea>
+            </label>
+            <label class="full">Env (KEY=VALOR, um por linha)
+              <textarea id="mcpEnv" rows="2" placeholder="API_KEY=abc"></textarea>
+            </label>
+          </div>
+          <div class="actions">
+            <button class="btn-primary" id="mcpAdd" type="button">Adicionar</button>
+            <button class="btn-ghost" id="mcpReload" type="button">Recarregar conexões</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== CONFIGURAÇÕES ========== -->
+      <section class="view view-settings" data-view="settings">
+        <header class="view-header">
+          <h2>Configurações</h2>
+          <p class="view-subtitle">
+            Edita <code>config/jarvis.yaml</code>. Itens marcados com
+            <span class="restart-badge">↻</span> exigem reiniciar o Jarvis.
+          </p>
+        </header>
+
+        <div class="card">
+          <h3>Usuária</h3>
+          <div class="form-grid">
+            <label>Nome
+              <input type="text" data-cfg="user.name"/>
+            </label>
+            <label>Tratamento
+              <input type="text" data-cfg="user.honorific"/>
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Voz (TTS) <span class="restart-badge" title="exige restart">↻</span></h3>
+          <div class="form-grid">
+            <label>Engine
+              <select data-cfg="narrator.engine">
+                <option value="edge_tts">edge_tts (grátis)</option>
+                <option value="fish_audio">fish_audio (pago)</option>
+              </select>
+            </label>
+            <label>Volume
+              <input type="number" step="0.05" min="0" max="1" data-cfg="narrator.volume"/>
+            </label>
+            <label>Edge voice
+              <input type="text" data-cfg="narrator.edge_tts.voice"/>
+            </label>
+            <label>Edge rate
+              <input type="text" data-cfg="narrator.edge_tts.rate" placeholder="+0%"/>
+            </label>
+            <label>Edge pitch
+              <input type="text" data-cfg="narrator.edge_tts.pitch" placeholder="+0Hz"/>
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Hotkey <span class="restart-badge" title="exige restart">↻</span></h3>
+          <div class="form-grid">
+            <label class="full">Push-to-talk
+              <input type="text" data-cfg="hotkey.push_to_talk" placeholder="<ctrl>+<alt>+j"/>
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Wake word <span class="restart-badge" title="exige restart">↻</span></h3>
+          <div class="form-grid">
+            <label class="checkbox">
+              <input type="checkbox" data-cfg="wake_word.enabled"/>
+              Ativar escuta contínua por "Jarvis"
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Agente Claude <span class="restart-badge" title="exige restart">↻</span></h3>
+          <div class="form-grid">
+            <label class="checkbox">
+              <input type="checkbox" data-cfg="agent.enabled"/>
+              Usar Claude como fallback (precisa ANTHROPIC_API_KEY)
+            </label>
+            <label>Modelo
+              <input type="text" data-cfg="agent.model" placeholder="claude-opus-4-7"/>
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Watchers <span class="restart-badge" title="exige restart">↻</span></h3>
+          <div class="form-grid">
+            <label class="checkbox">
+              <input type="checkbox" data-cfg="watchers.gitlab.enabled"/>
+              GitLab ativo
+            </label>
+            <label>Intervalo de poll (s)
+              <input type="number" data-cfg="watchers.gitlab.poll_interval_seconds"/>
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Spotify <span class="restart-badge" title="exige restart">↻</span></h3>
+          <div class="form-grid">
+            <label class="checkbox">
+              <input type="checkbox" data-cfg="tools.spotify.enabled"/>
+              Habilitar
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Code review <span class="restart-badge" title="exige restart">↻</span></h3>
+          <div class="form-grid">
+            <label class="checkbox">
+              <input type="checkbox" data-cfg="tools.code_review.enabled"/>
+              Habilitar
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" data-cfg="tools.code_review.dry_run"/>
+              Dry-run (não executa de verdade)
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" data-cfg="tools.code_review.auto_clone"/>
+              Auto-clone de repositórios
+            </label>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn-primary" id="cfgSave" type="button">Salvar</button>
+          <button class="btn-ghost" id="cfgReload" type="button">Recarregar</button>
+          <span class="save-hint" id="cfgHint"></span>
+        </div>
+      </section>
+
     </main>
-
-    <footer class="composer">
-      <input
-        type="text"
-        id="input"
-        autocomplete="off"
-        placeholder="diga algo, Senhora Bárbara..."
-      />
-      <button id="send" type="button">▶</button>
-    </footer>
   </div>
+
   <script src="/static/app.js"></script>
 </body>
 </html>

@@ -22,6 +22,11 @@ class VoskSTT:
             )
         self._model = Model(str(model_dir))
 
+    @property
+    def model(self) -> Model:
+        """Modelo Vosk carregado — para reuso (ex: wake word listener)."""
+        return self._model
+
     def transcribe(self, audio_pcm: bytes) -> str:
         """Recebe PCM mono 16kHz int16 e devolve a transcrição final."""
         recognizer = KaldiRecognizer(self._model, SAMPLE_RATE_HZ)
