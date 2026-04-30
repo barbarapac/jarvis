@@ -199,9 +199,9 @@ def start_ui_server(
 
     url = f"http://{host}:{port}"
     if not server.started:
-        print(f"[jarvis] AVISO: UI server não subiu em 8s — UI estará offline.", file=sys.stderr)
+        print(f"[jarvis] AVISO: UI server não subiu em 8s — UI estará offline.", file=sys.stderr, flush=True)
     else:
-        print(f"[jarvis] UI server pronto em {url}")
+        print(f"[jarvis] UI server pronto em {url}", flush=True)
     return t, server, url
 
 
@@ -211,7 +211,7 @@ def main() -> int:
     persona = build_persona(config)
     event_bus = EventBus()
 
-    print("[jarvis] subindo UI server primeiro...")
+    print("[jarvis] subindo UI server primeiro...", flush=True)
     # UI server primeiro pra ele estar de pé independente do que falhe abaixo.
     pending_text_handler: list = []  # late-binding hack; comamnder ainda não existe
     ui = start_ui_server(
