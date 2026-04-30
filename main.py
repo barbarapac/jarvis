@@ -23,7 +23,7 @@ from core.persona import Persona
 from core.state import WatcherState
 from core.stt import VoskSTT
 from core.tts import build_engine
-from tools.code_review import CodeReviewTool
+from tools.code_review import CodeReviewTool, project_configs_from_yaml
 from watchers.base import Watcher
 from watchers.gitlab import GitLabWatcher
 
@@ -66,8 +66,8 @@ def build_code_review(config: dict, narrator: Narrator, persona: Persona) -> Cod
     if not cfg.get("enabled"):
         return None
     return CodeReviewTool(
-        project_dirs=cfg.get("project_dirs") or {},
-        command_template=cfg.get("command") or ["claude", "-p", "/hp:review branch:{source_branch}"],
+        project_dirs=project_configs_from_yaml(cfg.get("project_dirs") or {}),
+        commands=cfg.get("commands") or {},
         narrator=narrator,
         persona=persona,
         dry_run=bool(cfg.get("dry_run", True)),

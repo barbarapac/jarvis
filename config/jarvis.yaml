@@ -16,7 +16,7 @@ narrator:
 watchers:
   gitlab:
     enabled: true
-    poll_interval_seconds: 30
+    poll_interval_seconds: 1000
 
 tools:
   spotify:
@@ -24,12 +24,20 @@ tools:
   code_review:
     enabled: true
     dry_run: true  # true = apenas imprime o comando, não executa. Mude pra false quando quiser rodar de verdade.
-    # Mapa: projeto GitLab (path_with_namespace) → diretório local com clone
+    # Templates por tipo de revisão. Adicione tipos custom aqui se quiser.
+    commands:
+      code: ["claude", "-p", "/hp:review branch:{source_branch}"]
+      docs: ["claude", "-p", "Revise as mudanças no branch '{source_branch}' deste repositório de documentação. Use git para inspecionar o diff contra a branch padrão. Foco em: 1) erros ortográficos e gramaticais em português brasileiro; 2) inconsistências de coerência entre as alterações e o restante; 3) afirmações ambíguas, desatualizadas ou contraditórias; 4) clareza e objetividade. Reporte findings citando arquivo e trecho. Seja conciso."]
+    # Mapa: projeto GitLab (path_with_namespace) → { path: clone local, type: code|docs }
     project_dirs: {}
-    # Exemplo:
+    # Exemplos:
     # project_dirs:
-    #   "softplan/justica/projeto-x": "C:/Users/barbara.pacheco/projects/projeto-x"
-    command: ["claude", "-p", "/hp:review branch:{source_branch}"]
+    #   "softplan/justica/algum-projeto-cs":
+    #     path: "C:/Users/barbara.pacheco/projects/algum-projeto-cs"
+    #     type: "code"
+    #   "softplan/justica/ministerios-publicos/arquitetura-de-software/mp-docs":
+    #     path: "C:/Users/barbara.pacheco/projects/mp-docs"
+    #     type: "docs"
 
 stt:
   # Modelo Vosk PT-BR. Precisa ter sido baixado via `py scripts/setup_stt.py`.

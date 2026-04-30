@@ -34,7 +34,7 @@ from core.persona import Persona
 from core.state import WatcherState
 from core.stt import VoskSTT
 from core.tts import build_engine
-from tools.code_review import CodeReviewTool
+from tools.code_review import CodeReviewTool, project_configs_from_yaml
 from watchers.gitlab import GitLabWatcher
 
 
@@ -68,8 +68,8 @@ def main() -> int:
 
     code_review_cfg = (config.get("tools") or {}).get("code_review") or {}
     code_review = CodeReviewTool(
-        project_dirs=code_review_cfg.get("project_dirs") or {},
-        command_template=code_review_cfg.get("command") or [],
+        project_dirs=project_configs_from_yaml(code_review_cfg.get("project_dirs") or {}),
+        commands=code_review_cfg.get("commands") or {},
         narrator=narrator,
         persona=persona,
         dry_run=True,  # sempre dry-run no teste
