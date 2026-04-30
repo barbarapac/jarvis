@@ -23,6 +23,7 @@ from core.persona import Persona
 from core.state import WatcherState
 from core.stt import VoskSTT
 from core.tts import build_engine
+from core.workspace import WorkspaceManager
 from tools.code_review import CodeReviewTool, project_configs_from_yaml
 from watchers.base import Watcher
 from watchers.gitlab import GitLabWatcher
@@ -61,7 +62,27 @@ def build_stt(config: dict) -> VoskSTT | None:
     return VoskSTT(model_dir)
 
 
-def build_code_review(config: dict, narrator: Narrator, persona: Persona) -> CodeReviewTool | None:
+def build_workspace(config: dict) -> WorkspaceManager | None:
+    cfg = (config.get("tools") or {}).get("code_review") or {}
+    if not cfg.get("auto_clone", True):
+        return None
+    token = os.environ.get("GITLAB_TOKEN", "")
+    if not token:
+        return None
+    base_url = os.environ.get("GITLAB_URL", "https://gitlab.com")
+    return WorkspaceManager(
+        root=ROOT / ".jarvis_state" / "repos",
+        gitlab_base_url=base_url,
+        gitlab_token=token,
+    )
+
+
+def build_code_review(
+    config: dict,
+    narrator: Narrator,
+    persona: Persona,
+    workspace: WorkspaceManager | None,
+) -> CodeReviewTool | None:
     cfg = (config.get("tools") or {}).get("code_review") or {}
     if not cfg.get("enabled"):
         return None
@@ -71,6 +92,7 @@ def build_code_review(config: dict, narrator: Narrator, persona: Persona) -> Cod
         narrator=narrator,
         persona=persona,
         dry_run=bool(cfg.get("dry_run", True)),
+        workspace=workspace,
     )
 
 
@@ -125,7 +147,8 @@ def main() -> int:
     )
     state = WatcherState(STATE_PATH)
     stt = build_stt(config)
-    code_review = build_code_review(config, narrator, persona)
+    workspace = build_workspace(config)
+    code_review = build_code_review(config, narrator, persona, workspace)
     watchers = build_watchers(config, narrator, persona, state, stt, code_review)
 
     boot = persona.boot_phrase()

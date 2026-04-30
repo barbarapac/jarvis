@@ -34,6 +34,7 @@ from core.persona import Persona
 from core.state import WatcherState
 from core.stt import VoskSTT
 from core.tts import build_engine
+from core.workspace import WorkspaceManager
 from tools.code_review import CodeReviewTool, project_configs_from_yaml
 from watchers.gitlab import GitLabWatcher
 
@@ -67,12 +68,20 @@ def main() -> int:
     stt = VoskSTT(model_dir)
 
     code_review_cfg = (config.get("tools") or {}).get("code_review") or {}
+    workspace = None
+    if code_review_cfg.get("auto_clone", True) and os.environ.get("GITLAB_TOKEN"):
+        workspace = WorkspaceManager(
+            root=ROOT / ".jarvis_state" / "repos",
+            gitlab_base_url=os.environ.get("GITLAB_URL", "https://gitlab.com"),
+            gitlab_token=os.environ["GITLAB_TOKEN"],
+        )
     code_review = CodeReviewTool(
         project_dirs=project_configs_from_yaml(code_review_cfg.get("project_dirs") or {}),
         commands=code_review_cfg.get("commands") or {},
         narrator=narrator,
         persona=persona,
         dry_run=True,  # sempre dry-run no teste
+        workspace=workspace,
     )
 
     # State temporário (não toca o real)

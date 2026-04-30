@@ -24,20 +24,22 @@ tools:
   code_review:
     enabled: true
     dry_run: true  # true = apenas imprime o comando, não executa. Mude pra false quando quiser rodar de verdade.
+    auto_clone: true  # se o projeto não tiver path, faz shallow clone em .jarvis_state/repos/
     # Templates por tipo de revisão. Adicione tipos custom aqui se quiser.
     commands:
       code: ["claude", "-p", "/hp:review branch:{source_branch}"]
       docs: ["claude", "-p", "Revise as mudanças no branch '{source_branch}' deste repositório de documentação. Use git para inspecionar o diff contra a branch padrão. Foco em: 1) erros ortográficos e gramaticais em português brasileiro; 2) inconsistências de coerência entre as alterações e o restante; 3) afirmações ambíguas, desatualizadas ou contraditórias; 4) clareza e objetividade. Reporte findings citando arquivo e trecho. Seja conciso."]
-    # Mapa: projeto GitLab (path_with_namespace) → { path: clone local, type: code|docs }
+    # Override por projeto. Sem entry → assume type=code com auto-clone.
     project_dirs: {}
     # Exemplos:
     # project_dirs:
-    #   "softplan/justica/algum-projeto-cs":
-    #     path: "C:/Users/barbara.pacheco/projects/algum-projeto-cs"
-    #     type: "code"
+    #   # Repo de docs — força type docs (default seria code)
     #   "softplan/justica/ministerios-publicos/arquitetura-de-software/mp-docs":
-    #     path: "C:/Users/barbara.pacheco/projects/mp-docs"
     #     type: "docs"
+    #   # Repo onde já tenho clone local — usa esse path em vez do auto-clone
+    #   "softplan/justica/algum-projeto":
+    #     path: "C:/Users/barbara.pacheco/projects/algum-projeto"
+    #     type: "code"
 
 stt:
   # Modelo Vosk PT-BR. Precisa ter sido baixado via `py scripts/setup_stt.py`.
