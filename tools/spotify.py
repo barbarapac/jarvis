@@ -74,11 +74,23 @@ class SpotifyTool:
         device = self._active_device_id()
         self._client.previous_track(device_id=device)
 
-    def play_playlist(self, query: str) -> str:
-        """Procura playlist por nome e toca. Retorna o nome da playlist achada."""
-        playlist_uri, name = self._find_playlist(query)
-        device = self._active_device_id()
-        self._client.start_playback(device_id=device, context_uri=playlist_uri)
+    def play_playlist(self, query_or_ref: str) -> str:
+        """Toca uma playlist. Aceita nome (busca), URI ou URL do Spotify."""
+        s = (query_or_ref or "").strip()
+        if not s:
+            raise SpotifyError("playlist: parâmetro vazio")
+        if s.startswith("spotify:playlist:") or "open.spotify.com/" in s and "/playlist/" in s:
+            playlist_id = _extract_id(s, "playlist")
+            uri = f"spotify:playlist:{playlist_id}"
+            try:
+                info = self._client.playlist(playlist_id, fields="name")
+                name = info.get("name") or "playlist"
+            except Exception:
+                name = "playlist"
+            self._client.start_playback(device_id=self._active_device_id(), context_uri=uri)
+            return name
+        playlist_uri, name = self._find_playlist(s)
+        self._client.start_playback(device_id=self._active_device_id(), context_uri=playlist_uri)
         return name
 
     def play_track(self, ref: str) -> str:
