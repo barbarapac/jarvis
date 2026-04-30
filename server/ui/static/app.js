@@ -25,6 +25,7 @@ const mcpReloadBtn = document.getElementById("mcpReload");
 
 const cmdList = document.getElementById("cmdList");
 const cmdAddBtn = document.getElementById("cmdAdd");
+const cmdCancelBtn = document.getElementById("cmdCancel");
 const cmdToolSel = document.getElementById("cmdTool");
 const cmdActionSel = document.getElementById("cmdAction");
 const cmdParamsBox = document.getElementById("cmdParams");
@@ -73,6 +74,17 @@ function setStatus(state) {
 
 function setLastLine(text) {
   lastLine.textContent = text || "";
+}
+
+function setMicRecordingUi(recording) {
+  const label = micBtn.querySelector(".mic-label");
+  if (recording) {
+    micBtn.classList.add("recording");
+    if (label) label.textContent = "GRAVANDO...";
+  } else {
+    micBtn.classList.remove("recording");
+    if (label) label.textContent = "FALAR";
+  }
 }
 
 // ============================================================
@@ -126,12 +138,20 @@ function handleEvent(evt) {
       break;
     case "listening_started":
       setStatus("listening");
+      setMicRecordingUi(true);
+      setLastLine("Ouvindo...");
       break;
     case "listening_ended":
       setStatus("idle");
+      // Só restaura o botão se NÃO for o gravador local (UI mic) — esse tem
+      // ciclo próprio gerenciado por start/stopMic.
+      if (!micRecorder) setMicRecordingUi(false);
       break;
     case "user_voice_transcribed":
-      if (data.text) addEntry({ kind: "user", badge: "VOCÊ", text: data.text });
+      if (data.text) {
+        addEntry({ kind: "user", badge: "VOCÊ", text: data.text });
+        setLastLine(`Você: ${data.text}`);
+      }
       break;
     case "user_text_input":
       addEntry({ kind: "user", badge: "VOCÊ", text: data.text });
@@ -299,8 +319,7 @@ async function startMic() {
   try {
     micRecorder = new MicRecorder();
     await micRecorder.start();
-    micBtn.classList.add("recording");
-    micBtn.querySelector(".mic-label").textContent = "GRAVANDO...";
+    setMicRecordingUi(true);
     setStatus("listening");
   } catch (e) {
     addEntry({ kind: "error", badge: "MIC", text: `Microfone falhou: ${e.message}` });
@@ -313,8 +332,7 @@ async function stopMic() {
   try {
     const pcm = await micRecorder.stop();
     micRecorder = null;
-    micBtn.classList.remove("recording");
-    micBtn.querySelector(".mic-label").textContent = "FALAR";
+    setMicRecordingUi(false);
     if (!pcm || pcm.length < 1600) { // < 0.1s
       setStatus("idle");
       return;
@@ -568,6 +586,7 @@ mcpReloadBtn.addEventListener("click", async () => {
 
 let commandsCatalog = [];
 let commandsList = [];
+let editingCommandIndex = null;
 
 async function loadCommands() {
   try {
@@ -582,8 +601,7 @@ async function loadCommands() {
     commandsCatalog = catalogData.tools || [];
     commandsList = cmdData.commands || [];
     populateToolSelect();
-    renderCommands();
-    cmdHint.textContent = "";
+    cancelEditCommand();
   } catch (e) {
     cmdList.innerHTML = `<div class="mcp-empty">Falha lendo comandos: ${escapeHtml(e.message)}</div>`;
   }
@@ -664,6 +682,7 @@ function renderCommands() {
       : "";
     const row = document.createElement("div");
     row.className = "mcp-row connected";
+    if (editingCommandIndex === i) row.classList.add("editing");
     row.innerHTML = `
       <div class="mcp-info">
         <div class="mcp-name">${escapeHtml(c.trigger)}</div>
@@ -671,12 +690,56 @@ function renderCommands() {
         <div class="mcp-tools">${escapeHtml(c.tool)}.${escapeHtml(c.action)}${escapeHtml(paramsText)}</div>
       </div>
       <div class="mcp-actions">
-        <button class="icon-btn danger" data-idx="${i}" type="button">Remover</button>
+        <button class="icon-btn" data-action="edit" type="button">Editar</button>
+        <button class="icon-btn danger" data-action="remove" type="button">Remover</button>
       </div>
     `;
-    row.querySelector("button").addEventListener("click", () => removeCommand(i));
+    row.querySelector('[data-action="edit"]').addEventListener("click", () => startEditCommand(i));
+    row.querySelector('[data-action="remove"]').addEventListener("click", () => removeCommand(i));
     cmdList.appendChild(row);
   }
+}
+
+function startEditCommand(index) {
+  const c = commandsList[index];
+  if (!c) return;
+  editingCommandIndex = index;
+  cmdTriggerInp.value = c.trigger || "";
+  cmdDescriptionInp.value = c.description || "";
+
+  // Garante que tool/action existem no catálogo antes de selecionar.
+  if (commandsCatalog.find((t) => t.name === c.tool)) {
+    cmdToolSel.value = c.tool;
+  }
+  populateActionSelect();
+  if (cmdActionSel.querySelector(`option[value="${c.action}"]`)) {
+    cmdActionSel.value = c.action;
+  }
+  renderParamsForm();
+  for (const [name, value] of Object.entries(c.params || {})) {
+    const el = cmdParamsBox.querySelector(`[data-param-name="${name}"]`);
+    if (el) el.value = value;
+  }
+
+  cmdAddBtn.textContent = "Salvar";
+  cmdCancelBtn.style.display = "";
+  cmdHint.textContent = `Editando: ${c.trigger}`;
+  renderCommands();
+  cmdAddBtn.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function cancelEditCommand() {
+  editingCommandIndex = null;
+  cmdTriggerInp.value = "";
+  cmdDescriptionInp.value = "";
+  if (commandsCatalog.length) {
+    cmdToolSel.value = commandsCatalog[0].name;
+    populateActionSelect();
+  }
+  cmdAddBtn.textContent = "Adicionar";
+  cmdCancelBtn.style.display = "none";
+  cmdHint.textContent = "";
+  renderCommands();
 }
 
 async function saveCommands(commands) {
@@ -717,17 +780,24 @@ cmdAddBtn.addEventListener("click", async () => {
     const val = el.value.trim();
     if (val !== "") params[name] = el.type === "number" ? Number(val) : val;
   });
+  const newCmd = { trigger, description, tool, action, params };
   cmdHint.textContent = "Salvando...";
   try {
-    await saveCommands([...commandsList, { trigger, description, tool, action, params }]);
-    cmdTriggerInp.value = "";
-    cmdDescriptionInp.value = "";
-    cmdParamsBox.querySelectorAll("[data-param-name]").forEach((el) => (el.value = ""));
+    let next;
+    if (editingCommandIndex !== null) {
+      next = commandsList.map((c, i) => (i === editingCommandIndex ? newCmd : c));
+    } else {
+      next = [...commandsList, newCmd];
+    }
+    await saveCommands(next);
+    cancelEditCommand();
     cmdHint.textContent = "Salvo. Reinicie o Jarvis pra aplicar.";
   } catch (e) {
     cmdHint.textContent = `Falha ao salvar: ${e.message}`;
   }
 });
+
+cmdCancelBtn.addEventListener("click", cancelEditCommand);
 
 // ============================================================
 //                       Capabilities

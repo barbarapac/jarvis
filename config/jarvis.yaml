@@ -56,11 +56,43 @@ commands:
     tool: spotify
     action: play_playlist
     params:
-      playlist: ACDS
+      playlist: ACDC
   - trigger: jarvis, oque está tocando?
     description: Diz qual musica esta tocando
     tool: spotify
     action: current
+    params: {}
+  - trigger: to triste
+    description: toca musica favorita
+    tool: spotify
+    action: play_track
+    params:
+      track: 
+        https://open.spotify.com/intl-pt/track/6wVWJl64yoTzU27EI8ep20?si=23010b57c9a04311
+  - trigger: Oi jarvis
+    description: Saudação inicial (varia com a hora)
+    tool: persona
+    action: greet
+    params: {}
+  - trigger: minhas revisões
+    description: MRs aguardando revisão
+    tool: gitlab
+    action: list_pending_reviews
+    params: {}
+  - trigger: minhas pendências
+    description: Contagem de pendências do GitLab
+    tool: gitlab
+    action: count_pending
+    params: {}
+  - trigger: Olá
+    description: ''
+    tool: persona
+    action: greet
+    params: {}
+  - trigger: Boa noite jarvis
+    description: ''
+    tool: persona
+    action: greet
     params: {}
 tools:
   spotify:
@@ -88,8 +120,19 @@ tools:
         type: "docs"
 
 stt:
-  # Modelo Vosk PT-BR. Precisa ter sido baixado via `py scripts/setup_stt.py`.
+  # Engine: "vosk" (rápido, fraco) | "whisper" (lento, muito preciso).
+  engine: "whisper"
+  # Modelo Vosk PT-BR. Usado se engine=vosk OU se wake word estiver ligado.
+  # Baixar via `py scripts/setup_stt.py`.
   model_dir: ".jarvis_state/vosk_model_pt"
+  whisper:
+    # Tamanhos: tiny | base | small | medium | large-v3
+    # small (~500MB) é o sweet-spot CPU. Baixa automaticamente no 1º uso.
+    model_size: "small"
+    device: "auto"        # "auto" | "cpu" | "cuda"
+    compute_type: "auto"  # "auto" | "int8" | "int8_float16" | "float16" | "float32"
+    language: "pt"
+    beam_size: 1
 
 agent:
   # Fallback inteligente quando o dispatch local não casa nenhum keyword.
@@ -101,4 +144,4 @@ agent:
 wake_word:
   # Liga escuta contínua pra acordar pelo nome "Jarvis". Mic fica sempre aberto.
   # Coexiste com push-to-talk; ambos disparam o mesmo fluxo de comando.
-  enabled: false
+  enabled: true

@@ -20,13 +20,14 @@ if sys.platform == "win32":
 import uvicorn
 from dotenv import load_dotenv
 
-from core.command_registry import Tool, build_spotify_tool
+from core.command_registry import Tool, build_gitlab_tool, build_persona_tool, build_spotify_tool
 from core.config_manager import ConfigManager
 from core.event_bus import EventBus, EventType
 from core.hotkey import HotkeyListener
 from core.mcp_manager import MCPManager
 from core.narrator import Narrator
 from core.persona import Persona
+from core.spotify_ducker import SpotifyDucker
 from core.state import WatcherState
 from core.stt import VoskSTT
 from core.tts import build_engine
@@ -36,6 +37,7 @@ from core.wake_word import WakeWordListener
 from core.workspace import WorkspaceManager
 from server.app import create_app
 from tools.code_review import CodeReviewTool, project_configs_from_yaml
+from tools.gitlab import GitLabTool
 from tools.spotify import SpotifyTool
 from watchers.base import Watcher
 from watchers.gitlab import GitLabWatcher
@@ -56,17 +58,50 @@ def build_persona(config: dict) -> Persona:
     )
 
 
-def build_stt(config: dict) -> VoskSTT | None:
+def build_vosk_stt(config: dict) -> VoskSTT | None:
+    """Constrói VoskSTT se modelo estiver disponível. Devolve None se ausente."""
     stt_cfg = config.get("stt", {}) or {}
     model_dir_str = stt_cfg.get("model_dir")
     if not model_dir_str:
         return None
     model_dir = ROOT / model_dir_str if not Path(model_dir_str).is_absolute() else Path(model_dir_str)
     if not model_dir.is_dir():
-        print(f"[jarvis] modelo Vosk ausente em {model_dir} — STT desativado.", file=sys.stderr)
+        print(f"[jarvis] modelo Vosk ausente em {model_dir}.", file=sys.stderr)
         print(f"[jarvis] rode `py scripts/setup_stt.py` pra baixá-lo.", file=sys.stderr)
         return None
     return VoskSTT(model_dir)
+
+
+def build_stt(config: dict):
+    """STT escolhido pra transcrição de comandos.
+
+    engine="whisper" → faster-whisper (preciso, mais lento)
+    engine="vosk" (default legado) → Vosk (rápido, fraco)
+
+    Em qualquer caso, se Whisper falhar ou faltar deps, cai pro Vosk.
+    """
+    stt_cfg = config.get("stt", {}) or {}
+    engine = (stt_cfg.get("engine") or "vosk").lower()
+    if engine == "whisper":
+        from core.stt_whisper import try_build_whisper
+        whisper = try_build_whisper(stt_cfg.get("whisper") or {})
+        if whisper is not None:
+            return whisper
+        print("[jarvis] caindo no Vosk como fallback.", file=sys.stderr)
+    return build_vosk_stt(config)
+
+
+def build_gitlab_tool_inst() -> GitLabTool | None:
+    """Constrói a Tool GitLab se houver token. Compartilha auth com o watcher."""
+    token = os.environ.get("GITLAB_TOKEN", "")
+    if not token:
+        return None
+    base_url = os.environ.get("GITLAB_URL", "https://gitlab.com")
+    try:
+        return GitLabTool(token=token, base_url=base_url)
+    except Exception as e:
+        print(f"[jarvis] GitLab tool desativado: {e!r}", file=sys.stderr)
+        return None
 
 
 def build_spotify(config: dict) -> SpotifyTool | None:
@@ -301,6 +336,8 @@ def main() -> int:
     workspace = build_workspace(config)
     code_review = build_code_review(config, narrator, persona, workspace)
     spotify = build_spotify(config)
+    if spotify is not None:
+        SpotifyDucker(spotify, event_bus)
     agent = build_agent(config, persona, mcp_manager)
     watchers = build_watchers(config, narrator, persona, state, stt, code_review, event_bus)
 
@@ -308,8 +345,12 @@ def main() -> int:
     hotkey_listener: HotkeyListener | None = None
     wake_listener: WakeWordListener | None = None
     if stt is not None:
+        tool_registry_state["persona"] = build_persona_tool(persona)
         if spotify is not None:
             tool_registry_state["spotify"] = build_spotify_tool(spotify)
+        gitlab_tool_inst = build_gitlab_tool_inst()
+        if gitlab_tool_inst is not None:
+            tool_registry_state["gitlab"] = build_gitlab_tool(gitlab_tool_inst)
         commander = VoiceCommander(
             stt=stt, narrator=narrator, persona=persona,
             spotify=spotify, event_bus=event_bus, agent=agent,
@@ -321,20 +362,24 @@ def main() -> int:
         combo = (config.get("hotkey") or {}).get("push_to_talk", "<ctrl>+<alt>+j")
         hotkey_listener = HotkeyListener(combo=combo, callback=commander.on_hotkey)
 
-        # Wake word — opt-in via config.
+        # Wake word — opt-in via config. Sempre usa Vosk (precisa de streaming).
         wake_cfg = (config.get("wake_word") or {})
         if wake_cfg.get("enabled", False):
-            wake_listener = WakeWordListener(
-                model=stt.model,
-                on_detected=commander.on_wake_word,
-            )
-            # Pausa enquanto Jarvis fala/ouve pra não auto-detonar.
-            def _on_event_pause(event):
-                if event.type in (EventType.SPEAKING_STARTED, EventType.LISTENING_STARTED):
-                    wake_listener.pause()
-                elif event.type in (EventType.SPEAKING_ENDED, EventType.LISTENING_ENDED):
-                    wake_listener.resume()
-            event_bus.subscribe(_on_event_pause)
+            vosk_for_wake = stt if hasattr(stt, "model") else build_vosk_stt(config)
+            if vosk_for_wake is None or not hasattr(vosk_for_wake, "model"):
+                print("[jarvis] wake word desativado: precisa do modelo Vosk.", file=sys.stderr)
+            else:
+                wake_listener = WakeWordListener(
+                    model=vosk_for_wake.model,
+                    on_detected=commander.on_wake_word,
+                )
+                # Pausa enquanto Jarvis fala/ouve pra não auto-detonar.
+                def _on_event_pause(event):
+                    if event.type in (EventType.SPEAKING_STARTED, EventType.LISTENING_STARTED):
+                        wake_listener.pause()
+                    elif event.type in (EventType.SPEAKING_ENDED, EventType.LISTENING_ENDED):
+                        wake_listener.resume()
+                event_bus.subscribe(_on_event_pause)
 
     boot = persona.boot_phrase()
     print(f"[jarvis] ({engine.name}) {boot}")

@@ -168,6 +168,42 @@ def build_spotify_tool(spotify) -> Tool:
     return Tool(name="spotify", label="Spotify", actions=actions)
 
 
+def build_persona_tool(persona) -> Tool:
+    """Cria a Tool 'persona' bindada à Persona ativa.
+
+    Atualmente expõe `greet` (frase de inicialização atual, varia com a hora).
+    """
+    actions = {
+        "greet": Action(
+            name="greet",
+            label="Saudar (frase de inicialização)",
+            params=(),
+            handler=lambda tool, p, ctx: persona.boot_phrase(),
+        ),
+    }
+    return Tool(name="persona", label="Persona", actions=actions)
+
+
+def build_gitlab_tool(gitlab) -> Tool:
+    """Cria a Tool 'gitlab' bindada à instância passada."""
+
+    actions = {
+        "list_pending_reviews": Action(
+            name="list_pending_reviews",
+            label="Listar MRs aguardando review",
+            params=(),
+            handler=lambda tool, p, ctx: gitlab.list_pending_reviews(),
+        ),
+        "count_pending": Action(
+            name="count_pending",
+            label="Contar pendências do GitLab",
+            params=(),
+            handler=lambda tool, p, ctx: gitlab.count_pending(),
+        ),
+    }
+    return Tool(name="gitlab", label="GitLab", actions=actions)
+
+
 def serialize_catalog(tools: dict[str, Tool]) -> list[dict]:
     """Forma JSON-friendly do catálogo, pra UI consumir via /api/commands/catalog."""
     return [

@@ -21,7 +21,12 @@ from __future__ import annotations
 import re
 import sys
 import threading
+from difflib import SequenceMatcher
 from typing import Optional
+
+# Threshold de similaridade pro fuzzy match. 0.78 ~= 1-2 letras de diferença
+# em triggers curtos. Calibrado pra evitar falsos positivos.
+_FUZZY_THRESHOLD = 0.78
 
 from core.audio_recorder import record_with_vad
 from core.command_registry import Tool
@@ -38,7 +43,8 @@ BEEP_DURATION_MS = 80
 
 # Built-ins do Spotify — reconhecimento padrão por palavras-chave em PT-BR.
 _BUILTIN_KEYWORDS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("spotify", "pause", ("pausa", "pausar", "pause", "para", "pare", "parar")),
+    # "para" foi removido: era ambíguo com a preposição ("pra X", "para revisar").
+    ("spotify", "pause", ("pausa", "pausar", "pause", "pare", "parar")),
     ("spotify", "resume", ("retoma", "retomar", "continua", "continuar", "play", "voltar a tocar")),
     ("spotify", "next", ("próxima", "proxima", "next", "skip", "pula", "pular")),
     ("spotify", "previous", ("anterior", "voltar", "volta", "previous")),
@@ -184,7 +190,7 @@ class VoiceCommander:
     def _dispatch_local(self, text: str) -> bool:
         normalized = _normalize_text(text)
 
-        # 1) Custom commands — substring match no trigger normalizado.
+        # 1) Custom commands — substring exato no trigger normalizado.
         #    Lista já vem ordenada por specificidade (trigger mais longo primeiro).
         for cmd in self._commands:
             if cmd["trigger_normalized"] in normalized:
@@ -203,6 +209,18 @@ class VoiceCommander:
             query = match.group(1).strip()
             if query and self._run_action("spotify", "play_playlist", {"playlist": query}):
                 return True
+
+        # 4) Fallback fuzzy — STT pode errar 1-2 letras ("modi foco", "modo focu").
+        #    Trigger mais longo (mais específico) ainda ganha.
+        best: tuple[float, dict] | None = None
+        for cmd in self._commands:
+            ratio = _best_window_ratio(normalized, cmd["trigger_normalized"])
+            if ratio >= _FUZZY_THRESHOLD and (best is None or ratio > best[0]):
+                best = (ratio, cmd)
+        if best is not None:
+            _, cmd = best
+            print(f"[voice] fuzzy match: {cmd['trigger']!r} (ratio {best[0]:.2f})")
+            return self._run_action(cmd["tool"], cmd["action"], cmd["params"])
 
         return False
 
@@ -243,6 +261,30 @@ class VoiceCommander:
             winsound.Beep(BEEP_FREQ_HZ, BEEP_DURATION_MS)
         except Exception:
             pass
+
+
+def _best_window_ratio(text: str, trigger: str) -> float:
+    """Maior razão de similaridade entre `trigger` e qualquer span contínuo
+    de palavras de mesmo tamanho dentro de `text`.
+
+    Mais robusto que comparar a frase inteira: "chaves ativar modo focu"
+    contém um span "modo focu" que é fuzzy-match de "modo foco".
+    """
+    if not trigger or not text:
+        return 0.0
+    trigger_words = trigger.split()
+    text_words = text.split()
+    n = len(trigger_words)
+    if n == 0 or n > len(text_words):
+        # Trigger maior que o texto inteiro — compara texto inteiro vs trigger.
+        return SequenceMatcher(None, text, trigger).ratio()
+    best = 0.0
+    for i in range(len(text_words) - n + 1):
+        span = " ".join(text_words[i : i + n])
+        ratio = SequenceMatcher(None, span, trigger).ratio()
+        if ratio > best:
+            best = ratio
+    return best
 
 
 def _normalize_command(raw: dict) -> Optional[dict]:

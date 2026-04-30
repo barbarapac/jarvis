@@ -105,6 +105,17 @@ class SpotifyTool:
         artists = ", ".join(a["name"] for a in info.get("artists") or [])
         return f"álbum {name} de {artists}" if artists else f"álbum {name}"
 
+    def active_device(self) -> Optional[dict]:
+        """Dict do device ativo (com `volume_percent`) ou None se nada tocando."""
+        playback = self._client.current_playback()
+        if not playback or not playback.get("is_playing"):
+            return None
+        return playback.get("device")
+
+    def set_volume(self, percent: int, device_id: Optional[str] = None) -> None:
+        """Ajusta volume (0-100) do device. Premium-only no Spotify."""
+        self._client.volume(max(0, min(100, int(percent))), device_id=device_id)
+
     def current_track(self) -> Optional[str]:
         """Retorna 'Música - Artista' ou None se nada tocando."""
         playing = self._client.current_playback()
