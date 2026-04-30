@@ -24,6 +24,13 @@ ui:
   port: 8765
   auto_open: true  # abre Edge --app no boot
 
+  fonts:
+    body: '"Share Tech Mono", monospace'
+    mono: '"Share Tech Mono", "Cascadia Mono", monospace'
+    brand: '"Orbitron", sans-serif'
+    imports:
+      - https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wgh
+        t@500;700&display=swap
 hotkey:
   push_to_talk: "<ctrl>+<alt>+j"
 
@@ -56,19 +63,13 @@ commands:
     tool: spotify
     action: play_playlist
     params:
-      playlist: ACDC
+      playlist: 
+        https://open.spotify.com/playlist/37i9dQZF1DZ06evO49hLQA?si=b54f709b40364c09
   - trigger: jarvis, oque está tocando?
     description: Diz qual musica esta tocando
     tool: spotify
     action: current
     params: {}
-  - trigger: to triste
-    description: toca musica favorita
-    tool: spotify
-    action: play_track
-    params:
-      track: 
-        https://open.spotify.com/intl-pt/track/6wVWJl64yoTzU27EI8ep20?si=23010b57c9a04311
   - trigger: Oi jarvis
     description: Saudação inicial (varia com a hora)
     tool: persona
@@ -135,11 +136,32 @@ stt:
     beam_size: 1
 
 agent:
-  # Fallback inteligente quando o dispatch local não casa nenhum keyword.
-  # Usa Claude API com tool-calling pros MCPs configurados em config/mcp_servers.json.
-  # Requer ANTHROPIC_API_KEY no .env.
+  # Motor de raciocínio quando o dispatch local não casa nenhum keyword.
+  # provider:
+  #   "anthropic" → cloud, requer ANTHROPIC_API_KEY no .env. Tool calling robusto,
+  #                 prompt caching ativo (reduz custo ~50% em conversas multi-turno).
+  #   "ollama"    → roda local em localhost:11434 (grátis, privado). Use pra coisas
+  #                 sensíveis da Softplan ou quando estiver offline. Pra trocar:
+  #                 provider="ollama", model="llama3.2:3b" (ou qwen2.5:7b).
   enabled: true
-  model: "claude-opus-4-7"
+  provider: "anthropic"
+  model: "claude-haiku-4-5-20251001"
+  base_url: "http://localhost:11434/v1"  # só é lido se provider=ollama
+
+vault:
+  # Cérebro persistente do Jarvis — vault de markdown local (compatível com Obsidian).
+  # `root` aceita ~ (home) ou path absoluto. Se relativo, resolve a partir da pasta do projeto.
+  # Conteúdo de perfil/ e projetos/ é injetado no system prompt do agente.
+  # Interações ficam em interacoes/YYYY-MM-DD.md (append-only).
+  enabled: true
+  root: "~/Documents/jarvis-vault"
+
+briefing:
+  # Briefing matinal — Jarvis fala primeiro ao subir, se passou tempo suficiente
+  # desde a última vez. Usa Claude API (mesma key do agente) e fala via TTS.
+  # Aparece como turno especial 'Iniciativa' na view Conversa.
+  enabled: true
+  min_interval_hours: 6  # não dispara mais de uma vez nesse intervalo
 
 wake_word:
   # Liga escuta contínua pra acordar pelo nome "Jarvis". Mic fica sempre aberto.

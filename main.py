@@ -30,8 +30,10 @@ from core.persona import Persona
 from core.spotify_ducker import SpotifyDucker
 from core.state import WatcherState
 from core.stt import VoskSTT
+from core.briefing import BriefingService
 from core.tts import build_engine
 from core.ui_launcher import launch_app_window
+from core.vault import Vault
 from core.voice_command import VoiceCommander
 from core.wake_word import WakeWordListener
 from core.workspace import WorkspaceManager
@@ -46,6 +48,7 @@ ROOT = Path(__file__).parent
 CONFIG_PATH = ROOT / "config" / "jarvis.yaml"
 MCP_CONFIG_PATH = ROOT / "config" / "mcp_servers.json"
 STATE_PATH = ROOT / ".jarvis_state" / "watchers.json"
+BRIEFING_STATE_PATH = ROOT / ".jarvis_state" / "briefing.json"
 
 LOOP_TICK_SECONDS = 1.0
 
@@ -164,18 +167,110 @@ def build_code_review(
     )
 
 
-def build_agent(config: dict, persona: Persona, mcp_manager: MCPManager | None):
-    """Tenta construir o agente Claude. Devolve None se faltar API key/SDK."""
+def build_vault(config: dict) -> Vault | None:
+    """Constrói o Vault (cérebro markdown) se habilitado no config."""
+    cfg = (config.get("vault") or {})
+    if not cfg.get("enabled", True):
+        return None
+    raw = cfg.get("root") or "~/Documents/jarvis-vault"
+    root = Path(raw).expanduser()
+    if not root.is_absolute():
+        root = ROOT / raw
+    try:
+        return Vault(root=root)
+    except Exception as e:
+        print(f"[jarvis] vault desativado: {e!r}", file=sys.stderr)
+        return None
+
+
+def build_llm_client(config: dict):
+    """Cliente LLM compartilhado entre agent, briefing e synthesizer.
+
+    Lê provider de config.agent.provider — "ollama" (local) ou "anthropic"
+    (cloud). Retorna None se houver problema (ex: provider=anthropic sem
+    ANTHROPIC_API_KEY, ou import falhando), com log explicativo.
+    """
     agent_cfg = (config.get("agent") or {})
     if not agent_cfg.get("enabled", True):
         return None
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("[jarvis] agente Claude desativado: ANTHROPIC_API_KEY ausente.", file=sys.stderr)
+    provider = (agent_cfg.get("provider") or "ollama").strip().lower()
+    model = agent_cfg.get("model") or ("llama3.2:3b" if provider == "ollama" else "claude-opus-4-7")
+    base_url = agent_cfg.get("base_url")
+    try:
+        from core.llm_client import make_client
+    except ImportError as e:
+        print(f"[jarvis] LLM desativado: dependência ausente — {e}", file=sys.stderr)
+        return None
+    try:
+        return make_client(provider=provider, model=model, base_url=base_url)
+    except Exception as e:
+        print(f"[jarvis] LLM ({provider}/{model}) falhou: {e}", file=sys.stderr)
+        return None
+
+
+def build_briefing(
+    config: dict,
+    vault: Vault | None,
+    persona: Persona,
+    narrator: Narrator,
+    event_bus: EventBus,
+    gitlab_tool,
+    llm_client,
+) -> BriefingService | None:
+    """Briefing matinal — Jarvis fala primeiro. Reusa o llm_client global."""
+    cfg = config.get("briefing") or {}
+    if not cfg.get("enabled", True):
+        return None
+    if llm_client is None:
+        return None
+    try:
+        return BriefingService(
+            vault=vault,
+            persona=persona,
+            narrator=narrator,
+            event_bus=event_bus,
+            gitlab_tool=gitlab_tool,
+            state_path=BRIEFING_STATE_PATH,
+            llm_client=llm_client,
+            min_interval_hours=float(cfg.get("min_interval_hours", 6)),
+        )
+    except Exception as e:
+        print(f"[jarvis] briefing desativado: {e!r}", file=sys.stderr)
+        return None
+
+
+def build_synthesizer(config: dict, vault: Vault | None, llm_client):
+    """Synthesizer reusa o llm_client global."""
+    if vault is None or llm_client is None:
+        return None
+    try:
+        from core.synthesizer import Synthesizer
+    except ImportError as e:
+        print(f"[jarvis] synthesizer desativado: dependência ausente — {e}", file=sys.stderr)
+        return None
+    try:
+        return Synthesizer(vault=vault, llm_client=llm_client)
+    except Exception as e:
+        print(f"[jarvis] synthesizer falhou na inicialização: {e!r}", file=sys.stderr)
+        return None
+
+
+def build_agent(
+    config: dict,
+    persona: Persona,
+    mcp_manager: MCPManager | None,
+    vault: Vault | None,
+    event_bus: EventBus,
+    llm_client,
+):
+    """Constrói o agente com o llm_client compartilhado. None se LLM indisponível."""
+    if llm_client is None:
+        print("[jarvis] agente desativado: LLM indisponível.", file=sys.stderr)
         return None
     try:
         from core.agent import JarvisAgent
     except ImportError as e:
-        print(f"[jarvis] agente Claude desativado: SDK ausente — {e}", file=sys.stderr)
+        print(f"[jarvis] agente desativado: dependência ausente — {e}", file=sys.stderr)
         return None
 
     def tools_provider() -> list[dict]:
@@ -189,12 +284,14 @@ def build_agent(config: dict, persona: Persona, mcp_manager: MCPManager | None):
     try:
         return JarvisAgent(
             system_prompt=persona.system_prompt,
+            llm_client=llm_client,
             tool_list_provider=tools_provider,
             tool_caller=tool_caller,
-            model=agent_cfg.get("model", "claude-opus-4-7"),
+            vault=vault,
+            event_bus=event_bus,
         )
     except Exception as e:
-        print(f"[jarvis] agente Claude falhou na inicialização: {e!r}", file=sys.stderr)
+        print(f"[jarvis] agente falhou na inicialização: {e!r}", file=sys.stderr)
         return None
 
 
@@ -242,8 +339,13 @@ def start_ui_server(
     audio_handler,
     config_manager,
     mcp_manager,
+    secrets_manager,
     capabilities_provider,
     tool_registry_provider,
+    vault_provider,
+    synthesizer_provider,
+    briefing_provider,
+    agent_invoker,
 ) -> tuple[threading.Thread, uvicorn.Server, str] | None:
     ui_cfg = config.get("ui") or {}
     if not ui_cfg.get("enabled", True):
@@ -257,8 +359,13 @@ def start_ui_server(
         audio_handler=audio_handler,
         config_manager=config_manager,
         mcp_manager=mcp_manager,
+        secrets_manager=secrets_manager,
         capabilities_provider=capabilities_provider,
         tool_registry_provider=tool_registry_provider,
+        vault_provider=vault_provider,
+        synthesizer_provider=synthesizer_provider,
+        briefing_provider=briefing_provider,
+        agent_invoker=agent_invoker,
     )
     server_config = uvicorn.Config(
         app, host=host, port=port, log_level="info", access_log=False
@@ -293,6 +400,10 @@ def main() -> int:
     persona = build_persona(config)
     event_bus = EventBus()
 
+    # SecretsManager: gerencia o .env via UI (escopo localhost only).
+    from core.secrets_manager import SecretsManager
+    secrets_manager = SecretsManager(ROOT / ".env")
+
     # MCP manager primeiro pra ter tools prontas quando o agente precisar.
     mcp_manager = MCPManager(MCP_CONFIG_PATH)
     mcp_manager.start()
@@ -302,12 +413,29 @@ def main() -> int:
     pending_audio_handler: list = []
     capabilities_state: dict = {}
     tool_registry_state: dict[str, Tool] = {}
+    pending_vault: list = []
+    pending_synthesizer: list = []
+    pending_briefing: list = []
+    pending_agent_invoker: list = []
 
     def capabilities_provider() -> dict:
         return {"capabilities": dict(capabilities_state)}
 
     def tool_registry_provider() -> dict[str, Tool]:
         return tool_registry_state
+
+    def vault_provider():
+        return pending_vault[0] if pending_vault else None
+
+    def synthesizer_provider():
+        return pending_synthesizer[0] if pending_synthesizer else None
+
+    def briefing_provider():
+        return pending_briefing[0] if pending_briefing else None
+
+    def agent_invoker_proxy(text: str, mode: str | None) -> None:
+        if pending_agent_invoker:
+            pending_agent_invoker[0](text, mode)
 
     ui = start_ui_server(
         config,
@@ -316,8 +444,13 @@ def main() -> int:
         audio_handler=lambda b: (pending_audio_handler[0](b) if pending_audio_handler else None),
         config_manager=config_manager,
         mcp_manager=mcp_manager,
+        secrets_manager=secrets_manager,
         capabilities_provider=capabilities_provider,
         tool_registry_provider=tool_registry_provider,
+        vault_provider=vault_provider,
+        synthesizer_provider=synthesizer_provider,
+        briefing_provider=briefing_provider,
+        agent_invoker=agent_invoker_proxy,
     )
 
     try:
@@ -338,8 +471,65 @@ def main() -> int:
     spotify = build_spotify(config)
     if spotify is not None:
         SpotifyDucker(spotify, event_bus)
-    agent = build_agent(config, persona, mcp_manager)
+    vault = build_vault(config)
+    llm_client = build_llm_client(config)
+    synthesizer = build_synthesizer(config, vault, llm_client)
+    if vault is not None:
+        pending_vault.append(vault)
+    if synthesizer is not None:
+        pending_synthesizer.append(synthesizer)
+    agent = build_agent(config, persona, mcp_manager, vault, event_bus, llm_client)
+    if agent is not None:
+        agent_invoker_lock = threading.Lock()
+
+        def _agent_invoker(text: str, mode: str | None) -> None:
+            """Invocação direta do agente vinda da view Conversa.
+
+            Sem dispatch local: tudo vai pro Claude. Lock evita corrida com
+            outro turno em andamento (sessão do agente não é thread-safe).
+            """
+            text = (text or "").strip()
+            if not text:
+                return
+            if not agent_invoker_lock.acquire(blocking=False):
+                print("[agent_invoker] já processando outro turno — ignorando.")
+                return
+            try:
+                event_bus.publish(EventType.STATUS, state="working")
+                try:
+                    reply = agent.respond(text, mode=mode)
+                except Exception as e:
+                    print(f"[agent_invoker] falha: {e!r}", file=sys.stderr)
+                    narrator.speak(
+                        f"{persona.honorific}, falha consultando o cérebro: {e}."
+                    )
+                    return
+                if reply:
+                    narrator.speak(reply)
+            finally:
+                agent_invoker_lock.release()
+
+        pending_agent_invoker.append(_agent_invoker)
     watchers = build_watchers(config, narrator, persona, state, stt, code_review, event_bus)
+
+    # Briefing matinal — depende de gitlab_tool (já construído acima como gitlab_tool_inst,
+    # porém só dentro do bloco de tool_registry; reusa se possível)
+    gitlab_for_briefing = None
+    try:
+        gitlab_for_briefing = build_gitlab_tool_inst()
+    except Exception:
+        pass
+    briefing = build_briefing(
+        config,
+        vault=vault,
+        persona=persona,
+        narrator=narrator,
+        event_bus=event_bus,
+        gitlab_tool=gitlab_for_briefing,
+        llm_client=llm_client,
+    )
+    if briefing is not None:
+        pending_briefing.append(briefing)
 
     commander: VoiceCommander | None = None
     hotkey_listener: HotkeyListener | None = None
@@ -387,7 +577,9 @@ def main() -> int:
     if stt: capabilities.append("STT")
     if code_review: capabilities.append("code review" + (" (dry-run)" if code_review.dry_run else ""))
     if spotify: capabilities.append("spotify")
-    if agent: capabilities.append("agent (Claude API)")
+    if vault: capabilities.append(f"vault ({vault.root})")
+    if agent: capabilities.append("agent")
+    if briefing: capabilities.append("briefing matinal")
     if mcp_manager: capabilities.append(f"mcp ({len(mcp_manager.list_status())})")
     if hotkey_listener: capabilities.append(f"push-to-talk ({hotkey_listener.combo})")
     if wake_listener: capabilities.append("wake-word (jarvis)")
@@ -400,6 +592,7 @@ def main() -> int:
         "spotify": spotify is not None,
         "code_review": code_review is not None,
         "agent": agent is not None,
+        "vault": str(vault.root) if vault else None,
         "wake_word": wake_listener is not None,
         "hotkey": hotkey_listener.combo if hotkey_listener else None,
         "engine": engine.name,
@@ -415,6 +608,15 @@ def main() -> int:
         hotkey_listener.start()
     if wake_listener is not None:
         wake_listener.start()
+
+    # Briefing matinal em thread separada — não bloqueia o event loop nem o boot.
+    if briefing is not None and briefing.should_run():
+        def _run_briefing():
+            try:
+                briefing.run()
+            except Exception as e:
+                print(f"[jarvis] briefing falhou: {e!r}", file=sys.stderr)
+        threading.Thread(target=_run_briefing, daemon=True, name="briefing").start()
 
     if watchers:
         print(f"[jarvis] Monitorando: {', '.join(w.name for w in watchers)}")
