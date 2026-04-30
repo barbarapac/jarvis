@@ -514,7 +514,8 @@ code {
 
 /* ====== MCP list ====== */
 
-.mcp-list {
+.mcp-list,
+.cmd-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -580,4 +581,11 @@ code {
   border-radius: 8px;
   margin-top: 16px;
   max-width: 800px;
+}
+
+.card-hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0 0 12px;
+  letter-spacing: 0.3px;
 }

@@ -20,6 +20,7 @@ if sys.platform == "win32":
 import uvicorn
 from dotenv import load_dotenv
 
+from core.command_registry import Tool, build_spotify_tool
 from core.config_manager import ConfigManager
 from core.event_bus import EventBus, EventType
 from core.hotkey import HotkeyListener
@@ -207,6 +208,7 @@ def start_ui_server(
     config_manager,
     mcp_manager,
     capabilities_provider,
+    tool_registry_provider,
 ) -> tuple[threading.Thread, uvicorn.Server, str] | None:
     ui_cfg = config.get("ui") or {}
     if not ui_cfg.get("enabled", True):
@@ -221,6 +223,7 @@ def start_ui_server(
         config_manager=config_manager,
         mcp_manager=mcp_manager,
         capabilities_provider=capabilities_provider,
+        tool_registry_provider=tool_registry_provider,
     )
     server_config = uvicorn.Config(
         app, host=host, port=port, log_level="info", access_log=False
@@ -263,9 +266,13 @@ def main() -> int:
     pending_text_handler: list = []
     pending_audio_handler: list = []
     capabilities_state: dict = {}
+    tool_registry_state: dict[str, Tool] = {}
 
     def capabilities_provider() -> dict:
         return {"capabilities": dict(capabilities_state)}
+
+    def tool_registry_provider() -> dict[str, Tool]:
+        return tool_registry_state
 
     ui = start_ui_server(
         config,
@@ -275,6 +282,7 @@ def main() -> int:
         config_manager=config_manager,
         mcp_manager=mcp_manager,
         capabilities_provider=capabilities_provider,
+        tool_registry_provider=tool_registry_provider,
     )
 
     try:
@@ -300,9 +308,13 @@ def main() -> int:
     hotkey_listener: HotkeyListener | None = None
     wake_listener: WakeWordListener | None = None
     if stt is not None:
+        if spotify is not None:
+            tool_registry_state["spotify"] = build_spotify_tool(spotify)
         commander = VoiceCommander(
             stt=stt, narrator=narrator, persona=persona,
             spotify=spotify, event_bus=event_bus, agent=agent,
+            commands=config.get("commands") or [],
+            tool_registry=tool_registry_state,
         )
         pending_text_handler.append(commander.handle_text)
         pending_audio_handler.append(commander.handle_audio)

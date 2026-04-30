@@ -33,6 +33,10 @@
           <span class="nav-icon">⚙</span>
           <span class="nav-label">Ferramentas</span>
         </button>
+        <button class="nav-item" data-view="commands">
+          <span class="nav-icon">✦</span>
+          <span class="nav-label">Comandos</span>
+        </button>
         <button class="nav-item" data-view="settings">
           <span class="nav-icon">⚒</span>
           <span class="nav-label">Configurações</span>
@@ -184,6 +188,42 @@
           <div class="actions">
             <button class="btn-primary" id="mcpAdd" type="button">Adicionar</button>
             <button class="btn-ghost" id="mcpReload" type="button">Recarregar conexões</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== COMANDOS ========== -->
+      <section class="view view-commands" data-view="commands">
+        <header class="view-header">
+          <h2>Comandos</h2>
+          <p class="view-subtitle">
+            Frases que o Jarvis reconhece. Cada comando dispara uma ação numa ferramenta.
+            Built-ins (pausa, próxima, etc.) já funcionam sem cadastro.
+          </p>
+        </header>
+
+        <div class="cmd-list" id="cmdList"></div>
+
+        <div class="card cmd-add">
+          <h3>Adicionar comando</h3>
+          <div class="form-grid">
+            <label class="full">Gatilho (frase)
+              <input type="text" id="cmdTrigger" placeholder="ex: modo foco"/>
+            </label>
+            <label class="full">Descrição
+              <input type="text" id="cmdDescription" placeholder="o que esse comando faz"/>
+            </label>
+            <label>Ferramenta
+              <select id="cmdTool"></select>
+            </label>
+            <label>Ação
+              <select id="cmdAction"></select>
+            </label>
+            <div class="full" id="cmdParams"></div>
+          </div>
+          <div class="actions">
+            <button class="btn-primary" id="cmdAdd" type="button">Adicionar</button>
+            <span class="save-hint" id="cmdHint"></span>
           </div>
         </div>
       </section>

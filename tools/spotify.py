@@ -81,6 +81,30 @@ class SpotifyTool:
         self._client.start_playback(device_id=device, context_uri=playlist_uri)
         return name
 
+    def play_track(self, ref: str) -> str:
+        """Toca uma música por URI (spotify:track:...), URL ou ID puro."""
+        track_id = _extract_id(ref, "track")
+        info = self._client.track(track_id)
+        self._client.start_playback(
+            device_id=self._active_device_id(),
+            uris=[f"spotify:track:{track_id}"],
+        )
+        name = info.get("name") or "música"
+        artists = ", ".join(a["name"] for a in info.get("artists") or [])
+        return f"{name} de {artists}" if artists else name
+
+    def play_album(self, ref: str) -> str:
+        """Toca um álbum por URI (spotify:album:...), URL ou ID puro."""
+        album_id = _extract_id(ref, "album")
+        info = self._client.album(album_id)
+        self._client.start_playback(
+            device_id=self._active_device_id(),
+            context_uri=f"spotify:album:{album_id}",
+        )
+        name = info.get("name") or "álbum"
+        artists = ", ".join(a["name"] for a in info.get("artists") or [])
+        return f"álbum {name} de {artists}" if artists else f"álbum {name}"
+
     def current_track(self) -> Optional[str]:
         """Retorna 'Música - Artista' ou None se nada tocando."""
         playing = self._client.current_playback()
@@ -121,3 +145,17 @@ class SpotifyTool:
             return pl["uri"], pl["name"]
 
         raise SpotifyError(f"nenhuma playlist encontrada para {query!r}")
+
+
+def _extract_id(ref: str, kind: str) -> str:
+    """Aceita 'spotify:<kind>:<id>', URL open.spotify.com ou ID puro."""
+    s = (ref or "").strip()
+    if not s:
+        raise SpotifyError(f"{kind}: referência vazia")
+    prefix = f"spotify:{kind}:"
+    if s.startswith(prefix):
+        return s[len(prefix):].split("?", 1)[0]
+    marker = f"open.spotify.com/{kind}/"
+    if marker in s:
+        return s.split(marker, 1)[1].split("?", 1)[0].split("/", 1)[0]
+    return s.split("?", 1)[0]
