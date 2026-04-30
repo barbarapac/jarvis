@@ -26,6 +26,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from core.command_registry import Tool, serialize_catalog
 from core.config_manager import ConfigManager
 from core.event_bus import Event, EventBus, EventType
 from core.mcp_manager import MCPManager, MCPServerConfig
@@ -49,6 +50,18 @@ class MCPListIn(BaseModel):
     servers: list[MCPServerIn]
 
 
+class VoiceCommandIn(BaseModel):
+    trigger: str
+    description: str = ""
+    tool: str
+    action: str
+    params: dict[str, Any] = {}
+
+
+class VoiceCommandListIn(BaseModel):
+    commands: list[VoiceCommandIn]
+
+
 def create_app(
     *,
     event_bus: EventBus,
@@ -57,6 +70,7 @@ def create_app(
     config_manager: ConfigManager | None = None,
     mcp_manager: MCPManager | None = None,
     capabilities_provider: Callable[[], dict[str, Any]] | None = None,
+    tool_registry_provider: Callable[[], dict[str, Tool]] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Jarvis")
 
@@ -96,6 +110,37 @@ def create_app(
             raise HTTPException(status_code=503, detail="config indisponível")
         updated = await asyncio.to_thread(config_manager.patch, payload)
         return updated
+
+    # ---------- Voice commands ----------
+
+    @app.get("/api/commands")
+    async def list_commands() -> dict:
+        if config_manager is None:
+            raise HTTPException(status_code=503, detail="config indisponível")
+        cfg = await asyncio.to_thread(config_manager.load)
+        return {"commands": cfg.get("commands") or []}
+
+    @app.put("/api/commands")
+    async def put_commands(payload: VoiceCommandListIn) -> dict:
+        if config_manager is None:
+            raise HTTPException(status_code=503, detail="config indisponível")
+        commands = [
+            {
+                "trigger": c.trigger,
+                "description": c.description,
+                "tool": c.tool,
+                "action": c.action,
+                "params": dict(c.params),
+            }
+            for c in payload.commands
+        ]
+        await asyncio.to_thread(config_manager.patch, {"commands": commands})
+        return {"ok": True, "commands": commands}
+
+    @app.get("/api/commands/catalog")
+    async def commands_catalog() -> dict:
+        registry = tool_registry_provider() if tool_registry_provider else {}
+        return {"tools": serialize_catalog(registry)}
 
     # ---------- MCPs ----------
 

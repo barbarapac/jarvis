@@ -27,6 +27,74 @@ ui:
 hotkey:
   push_to_talk: "<ctrl>+<alt>+j"
 
+commands:
+  # Comandos custom mapeando frase → tool.action(params). Match por substring,
+  # case-insensitive, no texto transcrito. Built-ins (pausa/próxima/etc.) já
+  # funcionam sem configuração — entradas aqui só ADICIONAM ou customizam.
+  - trigger: jarvis, pausar musica
+    description: Pausar música
+    tool: spotify
+    action: pause
+    params: {}
+  - trigger: jarvis, retomar musica
+    description: Retomar música
+    tool: spotify
+    action: resume
+    params: {}
+  - trigger: jarvis, passar musica
+    description: Próxima música
+    tool: spotify
+    action: next
+    params: {}
+  - trigger: jarvis, voltar
+    description: Música anterior
+    tool: spotify
+    action: previous
+    params: {}
+  - trigger: modo foco
+    description: Toca minha playlist de foco
+    tool: spotify
+    action: play_playlist
+    params:
+      playlist: 
+        https://open.spotify.com/playlist/37i9dQZF1DZ06evO49hLQA?si=b54f709b40364c09
+  - trigger: jarvis, oque está tocando?
+    description: Diz qual musica esta tocando
+    tool: spotify
+    action: current
+    params: {}
+  - trigger: to triste
+    description: toca playlist quando estou triste
+    tool: spotify
+    action: play_playlist
+    params:
+      playlist:
+        https://open.spotify.com/playlist/37i9dQZF1DZ06evO49hLQA?si=b54f709b40364c09
+  - trigger: Oi jarvis
+    description: Saudação inicial (varia com a hora)
+    tool: persona
+    action: greet
+    params: {}
+  - trigger: minhas revisões
+    description: MRs aguardando revisão
+    tool: gitlab
+    action: list_pending_reviews
+    params: {}
+  - trigger: minhas pendências
+    description: Contagem de pendências do GitLab
+    tool: gitlab
+    action: count_pending
+    params: {}
+  - trigger: Olá
+    description: ''
+    tool: persona
+    action: greet
+    params: {}
+  - trigger: Boa noite jarvis
+    description: ''
+    tool: persona
+    action: greet
+    params: {}
 tools:
   spotify:
     enabled: true
@@ -37,7 +105,12 @@ tools:
     # Templates por tipo de revisão. Adicione tipos custom aqui se quiser.
     commands:
       code: ["claude", "-p", "/hp:review branch:{source_branch}"]
-      docs: ["claude", "-p", "Revise as mudanças no branch '{source_branch}' deste repositório de documentação. Use git para inspecionar o diff contra a branch padrão. Foco em: 1) erros ortográficos e gramaticais em português brasileiro; 2) inconsistências de coerência entre as alterações e o restante; 3) afirmações ambíguas, desatualizadas ou contraditórias; 4) clareza e objetividade. Reporte findings citando arquivo e trecho. Seja conciso."]
+      docs: ["claude", "-p", "Revise as mudanças no branch '{source_branch}' deste
+            repositório de documentação. Use git para inspecionar o diff contra a
+            branch padrão. Foco em: 1) erros ortográficos e gramaticais em português
+            brasileiro; 2) inconsistências de coerência entre as alterações e o restante;
+            3) afirmações ambíguas, desatualizadas ou contraditórias; 4) clareza e
+            objetividade. Reporte findings citando arquivo e trecho. Seja conciso."]
     # Override por projeto. Sem entry → assume type=code com auto-clone.
     # Exemplos:
     #   "softplan/justica/algum-projeto":
@@ -48,8 +121,19 @@ tools:
         type: "docs"
 
 stt:
-  # Modelo Vosk PT-BR. Precisa ter sido baixado via `py scripts/setup_stt.py`.
+  # Engine: "vosk" (rápido, fraco) | "whisper" (lento, muito preciso).
+  engine: "whisper"
+  # Modelo Vosk PT-BR. Usado se engine=vosk OU se wake word estiver ligado.
+  # Baixar via `py scripts/setup_stt.py`.
   model_dir: ".jarvis_state/vosk_model_pt"
+  whisper:
+    # Tamanhos: tiny | base | small | medium | large-v3
+    # small (~500MB) é o sweet-spot CPU. Baixa automaticamente no 1º uso.
+    model_size: "small"
+    device: "auto"        # "auto" | "cpu" | "cuda"
+    compute_type: "auto"  # "auto" | "int8" | "int8_float16" | "float16" | "float32"
+    language: "pt"
+    beam_size: 1
 
 agent:
   # Fallback inteligente quando o dispatch local não casa nenhum keyword.
@@ -61,4 +145,4 @@ agent:
 wake_word:
   # Liga escuta contínua pra acordar pelo nome "Jarvis". Mic fica sempre aberto.
   # Coexiste com push-to-talk; ambos disparam o mesmo fluxo de comando.
-  enabled: false
+  enabled: true

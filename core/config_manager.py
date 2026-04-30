@@ -69,8 +69,11 @@ def _to_plain(obj: Any) -> Any:
 
 
 def _deep_merge(target: Any, src: dict[str, Any]) -> None:
-    """Merge recursivo: dicts viram merge; resto sobrescreve."""
+    """Merge recursivo: dicts viram merge; None remove a chave; resto sobrescreve."""
     for key, value in src.items():
+        if value is None and key in target:
+            del target[key]
+            continue
         if (
             key in target
             and isinstance(target[key], dict)

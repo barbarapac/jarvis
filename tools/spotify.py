@@ -74,12 +74,59 @@ class SpotifyTool:
         device = self._active_device_id()
         self._client.previous_track(device_id=device)
 
-    def play_playlist(self, query: str) -> str:
-        """Procura playlist por nome e toca. Retorna o nome da playlist achada."""
-        playlist_uri, name = self._find_playlist(query)
-        device = self._active_device_id()
-        self._client.start_playback(device_id=device, context_uri=playlist_uri)
+    def play_playlist(self, query_or_ref: str) -> str:
+        """Toca uma playlist. Aceita nome (busca), URI ou URL do Spotify."""
+        s = (query_or_ref or "").strip()
+        if not s:
+            raise SpotifyError("playlist: parâmetro vazio")
+        if s.startswith("spotify:playlist:") or "open.spotify.com/" in s and "/playlist/" in s:
+            playlist_id = _extract_id(s, "playlist")
+            uri = f"spotify:playlist:{playlist_id}"
+            try:
+                info = self._client.playlist(playlist_id, fields="name")
+                name = info.get("name") or "playlist"
+            except Exception:
+                name = "playlist"
+            self._client.start_playback(device_id=self._active_device_id(), context_uri=uri)
+            return name
+        playlist_uri, name = self._find_playlist(s)
+        self._client.start_playback(device_id=self._active_device_id(), context_uri=playlist_uri)
         return name
+
+    def play_track(self, ref: str) -> str:
+        """Toca uma música por URI (spotify:track:...), URL ou ID puro."""
+        track_id = _extract_id(ref, "track")
+        info = self._client.track(track_id)
+        self._client.start_playback(
+            device_id=self._active_device_id(),
+            uris=[f"spotify:track:{track_id}"],
+        )
+        name = info.get("name") or "música"
+        artists = ", ".join(a["name"] for a in info.get("artists") or [])
+        return f"{name} de {artists}" if artists else name
+
+    def play_album(self, ref: str) -> str:
+        """Toca um álbum por URI (spotify:album:...), URL ou ID puro."""
+        album_id = _extract_id(ref, "album")
+        info = self._client.album(album_id)
+        self._client.start_playback(
+            device_id=self._active_device_id(),
+            context_uri=f"spotify:album:{album_id}",
+        )
+        name = info.get("name") or "álbum"
+        artists = ", ".join(a["name"] for a in info.get("artists") or [])
+        return f"álbum {name} de {artists}" if artists else f"álbum {name}"
+
+    def active_device(self) -> Optional[dict]:
+        """Dict do device ativo (com `volume_percent`) ou None se nada tocando."""
+        playback = self._client.current_playback()
+        if not playback or not playback.get("is_playing"):
+            return None
+        return playback.get("device")
+
+    def set_volume(self, percent: int, device_id: Optional[str] = None) -> None:
+        """Ajusta volume (0-100) do device. Premium-only no Spotify."""
+        self._client.volume(max(0, min(100, int(percent))), device_id=device_id)
 
     def current_track(self) -> Optional[str]:
         """Retorna 'Música - Artista' ou None se nada tocando."""
@@ -121,3 +168,17 @@ class SpotifyTool:
             return pl["uri"], pl["name"]
 
         raise SpotifyError(f"nenhuma playlist encontrada para {query!r}")
+
+
+def _extract_id(ref: str, kind: str) -> str:
+    """Aceita 'spotify:<kind>:<id>', URL open.spotify.com ou ID puro."""
+    s = (ref or "").strip()
+    if not s:
+        raise SpotifyError(f"{kind}: referência vazia")
+    prefix = f"spotify:{kind}:"
+    if s.startswith(prefix):
+        return s[len(prefix):].split("?", 1)[0]
+    marker = f"open.spotify.com/{kind}/"
+    if marker in s:
+        return s.split(marker, 1)[1].split("?", 1)[0].split("/", 1)[0]
+    return s.split("?", 1)[0]
