@@ -40,6 +40,9 @@ tools:
     #   "softplan/justica/algum-projeto":
     #     path: "C:/Users/barbara.pacheco/projects/algum-projeto"
     #     type: "code"
+    project_dirs:                                                                                                                                         
+      "softplan/justica/ministerios-publicos/arquitetura-de-software/mp-docs":                                                                            
+        type: "docs"
 
 stt:
   # Modelo Vosk PT-BR. Precisa ter sido baixado via `py scripts/setup_stt.py`.

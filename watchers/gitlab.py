@@ -5,15 +5,16 @@ Cobre: review_requested, mentioned, directly_addressed, assigned, marked, etc.
 Docs: https://docs.gitlab.com/ee/api/todos.html
 
 Quando a action é `review_requested` E o tool de code review está disponível
-e o projeto está mapeado, o watcher entra num fluxo interativo: anuncia →
-pergunta → escuta voz → parse → executa ou cancela.
+e pode revisar o projeto, o watcher entra num fluxo interativo: anúncio +
+pergunta na MESMA chamada TTS → escuta voz com VAD → parse → executa ou
+cancela.
 """
 
 from __future__ import annotations
 
 import httpx
 
-from core.audio_recorder import record
+from core.audio_recorder import record_with_vad
 from core.intent import YesNo, parse_yes_no
 from core.narrator import SpeakingNarrator
 from core.persona import Persona
@@ -22,7 +23,7 @@ from core.stt import VoskSTT
 from tools.code_review import CodeReviewTool, ReviewRequest
 from watchers.base import Watcher
 
-VOICE_RESPONSE_DURATION_SECONDS = 5.0
+VOICE_RESPONSE_MAX_DURATION = 6.0
 
 
 class GitLabWatcher(Watcher):
@@ -88,90 +89,86 @@ class GitLabWatcher(Watcher):
         return resp.json()
 
     def _handle_todo(self, todo: dict, *, interactive: bool) -> None:
-        self._announce(todo)
         action = todo.get("action_name", "")
         target_type = todo.get("target_type", "")
 
-        # Fluxo interativo só pra review_requested em MR (não em primeira execução).
-        if not interactive:
-            return
-        if action != "review_requested" or target_type != "MergeRequest":
-            return
-        if not (self._stt and self._code_review):
-            return
-
-        project = todo.get("project") or {}
-        project_full_path = project.get("path_with_namespace") or project.get("name", "")
-        if not self._code_review.can_review(project_full_path):
-            print(f"[gitlab] projeto {project_full_path!r} sem dir local configurado — pulando prompt de revisão.")
-            return
-
-        target = todo.get("target") or {}
-        source_branch = target.get("source_branch", "")
-        if not source_branch:
-            return
-
-        self._prompt_and_review(
-            project_full_path=project_full_path,
-            source_branch=source_branch,
-            mr_url=todo.get("target_url", ""),
-            mr_title=target.get("title", ""),
+        is_review_prompt = (
+            interactive
+            and action == "review_requested"
+            and target_type == "MergeRequest"
+            and self._stt is not None
+            and self._code_review is not None
+            and self._code_review.can_review(self._project_full_path(todo))
         )
 
+        if is_review_prompt:
+            self._announce_with_review_prompt(todo)
+            self._listen_and_dispatch(todo)
+        else:
+            self._announce(todo)
+
+    def _announce_with_review_prompt(self, todo: dict) -> None:
+        """Anuncia + pergunta numa única chamada TTS (economiza ~2s vs 2 chamadas)."""
+        base_phrase = self._build_announcement(todo)
+        prompt = f"Deseja que eu execute a revisão, {self._persona.honorific}?"
+        combined = f"{base_phrase} {prompt}"
+        print(f"[gitlab] {combined}")
+        web_url = todo.get("target_url", "")
+        if web_url:
+            print(f"         {web_url}")
+        self._narrator.speak(combined)
+
     def _announce(self, todo: dict) -> None:
+        phrase = self._build_announcement(todo)
+        print(f"[gitlab] {phrase}")
+        web_url = todo.get("target_url", "")
+        if web_url:
+            print(f"         {web_url}")
+        self._narrator.speak(phrase)
+
+    def _build_announcement(self, todo: dict) -> str:
         action = todo.get("action_name", "")
         author = todo.get("author", {}).get("name", "alguém")
         target = todo.get("target") or {}
         target_type = todo.get("target_type", "")
         title = target.get("title") or target.get("name") or "(sem título)"
-        web_url = todo.get("target_url") or target.get("web_url", "")
         project = (todo.get("project") or {}).get("name", "")
-
-        phrase = self._persona.announce_gitlab_event(
+        return self._persona.announce_gitlab_event(
             action=action,
             author=author,
             target_type=target_type,
             title=title,
             project=project,
         )
-        print(f"[gitlab] {phrase}")
-        if web_url:
-            print(f"         {web_url}")
-        self._narrator.speak(phrase)
 
-    def _prompt_and_review(
-        self,
-        *,
-        project_full_path: str,
-        source_branch: str,
-        mr_url: str,
-        mr_title: str,
-    ) -> None:
+    def _listen_and_dispatch(self, todo: dict) -> None:
         assert self._stt is not None
         assert self._code_review is not None
 
-        self._narrator.speak(
-            f"Deseja que eu execute a revisão, {self._persona.honorific}?"
-        )
-        print(f"[gitlab] aguardando resposta de voz ({VOICE_RESPONSE_DURATION_SECONDS:.0f}s)...")
-        audio = record(VOICE_RESPONSE_DURATION_SECONDS)
+        print(f"[gitlab] aguardando resposta de voz (até {VOICE_RESPONSE_MAX_DURATION:.0f}s, com VAD)...")
+        audio = record_with_vad(max_duration_seconds=VOICE_RESPONSE_MAX_DURATION)
         text = self._stt.transcribe(audio)
         intent = parse_yes_no(text)
         print(f"[gitlab] transcrição: {text!r} → intent: {intent.value}")
 
         if intent == YesNo.YES:
+            target = todo.get("target") or {}
             self._code_review.run_async(
                 ReviewRequest(
-                    project_full_path=project_full_path,
-                    source_branch=source_branch,
-                    mr_url=mr_url,
-                    mr_title=mr_title,
+                    project_full_path=self._project_full_path(todo),
+                    source_branch=target.get("source_branch", ""),
+                    mr_url=todo.get("target_url", ""),
+                    mr_title=target.get("title", ""),
                 )
             )
         elif intent == YesNo.NO:
             self._narrator.speak(f"Como queira, {self._persona.honorific}.")
         else:
             self._narrator.speak(
-                f"Não compreendi sua resposta, {self._persona.honorific}. "
-                f"Cancelando o prompt de revisão."
+                f"Não compreendi sua resposta, {self._persona.honorific}."
             )
+
+    @staticmethod
+    def _project_full_path(todo: dict) -> str:
+        project = todo.get("project") or {}
+        return project.get("path_with_namespace") or project.get("name", "")
