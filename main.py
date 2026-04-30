@@ -179,22 +179,29 @@ def start_ui_server(
     port = int(ui_cfg.get("port", 8765))
     app = create_app(event_bus=event_bus, text_handler=text_handler)
     server_config = uvicorn.Config(
-        app, host=host, port=port, log_level="warning", access_log=False
+        app, host=host, port=port, log_level="info", access_log=False
     )
     server = uvicorn.Server(server_config)
 
     def run() -> None:
-        asyncio.run(server.serve())
+        try:
+            asyncio.run(server.serve())
+        except Exception as e:
+            print(f"[ui-server] CRASHED: {e!r}", file=sys.stderr)
 
     t = threading.Thread(target=run, daemon=True, name="ui-server")
     t.start()
 
     # Espera o server subir antes de retornar.
-    deadline = time.monotonic() + 5.0
+    deadline = time.monotonic() + 8.0
     while not server.started and time.monotonic() < deadline:
         time.sleep(0.05)
 
     url = f"http://{host}:{port}"
+    if not server.started:
+        print(f"[jarvis] AVISO: UI server não subiu em 8s — UI estará offline.", file=sys.stderr)
+    else:
+        print(f"[jarvis] UI server pronto em {url}")
     return t, server, url
 
 
@@ -203,6 +210,14 @@ def main() -> int:
     config = load_config()
     persona = build_persona(config)
     event_bus = EventBus()
+
+    print("[jarvis] subindo UI server primeiro...")
+    # UI server primeiro pra ele estar de pé independente do que falhe abaixo.
+    pending_text_handler: list = []  # late-binding hack; comamnder ainda não existe
+    ui = start_ui_server(
+        config, event_bus,
+        text_handler=lambda t: (pending_text_handler[0](t) if pending_text_handler else None),
+    )
 
     try:
         engine = build_engine(config)
@@ -229,14 +244,9 @@ def main() -> int:
             stt=stt, narrator=narrator, persona=persona,
             spotify=spotify, event_bus=event_bus,
         )
+        pending_text_handler.append(commander.handle_text)
         combo = (config.get("hotkey") or {}).get("push_to_talk", "<ctrl>+<alt>+j")
         hotkey_listener = HotkeyListener(combo=combo, callback=commander.on_hotkey)
-
-    # Sobe servidor UI antes do boot phrase pra UI capturar o evento.
-    ui = start_ui_server(
-        config, event_bus,
-        text_handler=(commander.handle_text if commander else lambda _t: None),
-    )
 
     boot = persona.boot_phrase()
     print(f"[jarvis] ({engine.name}) {boot}")
