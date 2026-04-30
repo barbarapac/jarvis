@@ -18,9 +18,12 @@ watchers:
     enabled: true
     poll_interval_seconds: 1000
 
+hotkey:
+  push_to_talk: "<ctrl>+<alt>+j"
+
 tools:
   spotify:
-    enabled: false
+    enabled: true
   code_review:
     enabled: true
     dry_run: true  # true = apenas imprime o comando, não executa. Mude pra false quando quiser rodar de verdade.

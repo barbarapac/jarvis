@@ -23,8 +23,11 @@ from core.persona import Persona
 from core.state import WatcherState
 from core.stt import VoskSTT
 from core.tts import build_engine
+from core.hotkey import HotkeyListener
+from core.voice_command import VoiceCommander
 from core.workspace import WorkspaceManager
 from tools.code_review import CodeReviewTool, project_configs_from_yaml
+from tools.spotify import SpotifyTool
 from watchers.base import Watcher
 from watchers.gitlab import GitLabWatcher
 
@@ -60,6 +63,32 @@ def build_stt(config: dict) -> VoskSTT | None:
         print(f"[jarvis] rode `py scripts/setup_stt.py` pra baixá-lo.", file=sys.stderr)
         return None
     return VoskSTT(model_dir)
+
+
+def build_spotify(config: dict) -> SpotifyTool | None:
+    cfg = (config.get("tools") or {}).get("spotify") or {}
+    if not cfg.get("enabled"):
+        return None
+    client_id = os.environ.get("SPOTIFY_CLIENT_ID", "")
+    client_secret = os.environ.get("SPOTIFY_CLIENT_SECRET", "")
+    redirect_uri = os.environ.get("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8888/callback")
+    if not (client_id and client_secret):
+        print("[jarvis] Spotify desativado: SPOTIFY_CLIENT_ID/SECRET ausentes no .env", file=sys.stderr)
+        return None
+    cache_path = ROOT / ".jarvis_state" / "spotify_cache"
+    try:
+        tool = SpotifyTool(
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
+            cache_path=cache_path,
+        )
+        tool.ensure_auth()
+        return tool
+    except Exception as e:
+        print(f"[jarvis] Spotify desativado por erro de auth: {e!r}", file=sys.stderr)
+        print(f"[jarvis] rode `py scripts/setup_spotify.py` pra autorizar.", file=sys.stderr)
+        return None
 
 
 def build_workspace(config: dict) -> WorkspaceManager | None:
@@ -149,7 +178,15 @@ def main() -> int:
     stt = build_stt(config)
     workspace = build_workspace(config)
     code_review = build_code_review(config, narrator, persona, workspace)
+    spotify = build_spotify(config)
     watchers = build_watchers(config, narrator, persona, state, stt, code_review)
+
+    # Push-to-talk: requer STT. Tools controlados por voz são opcionais (Spotify por enquanto).
+    hotkey_listener: HotkeyListener | None = None
+    if stt is not None:
+        commander = VoiceCommander(stt=stt, narrator=narrator, persona=persona, spotify=spotify)
+        combo = (config.get("hotkey") or {}).get("push_to_talk", "<ctrl>+<alt>+j")
+        hotkey_listener = HotkeyListener(combo=combo, callback=commander.on_hotkey)
 
     boot = persona.boot_phrase()
     print(f"[jarvis] ({engine.name}) {boot}")
@@ -158,15 +195,19 @@ def main() -> int:
         capabilities.append("STT")
     if code_review:
         capabilities.append("code review" + (" (dry-run)" if code_review.dry_run else ""))
+    if spotify:
+        capabilities.append("spotify")
+    if hotkey_listener:
+        capabilities.append(f"push-to-talk ({hotkey_listener.combo})")
     if capabilities:
         print(f"[jarvis] capacidades: {', '.join(capabilities)}")
     narrator.speak(boot)
 
-    if not watchers:
-        print("[jarvis] Nenhum watcher habilitado. Encerrando.")
-        return 0
+    if hotkey_listener is not None:
+        hotkey_listener.start()
 
-    print(f"[jarvis] Monitorando: {', '.join(w.name for w in watchers)}")
+    if watchers:
+        print(f"[jarvis] Monitorando: {', '.join(w.name for w in watchers)}")
     print("[jarvis] Ctrl+C para encerrar.")
 
     try:
@@ -176,6 +217,8 @@ def main() -> int:
             time.sleep(LOOP_TICK_SECONDS)
     except KeyboardInterrupt:
         print("\n[jarvis] Encerrando...")
+        if hotkey_listener is not None:
+            hotkey_listener.stop()
         narrator.speak(persona.shutdown_phrase())
         return 0
 
