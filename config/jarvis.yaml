@@ -1,0 +1,26 @@
+user:
+  name: "Bárbara"
+  honorific: "Senhora"
+
+narrator:
+  # Engines disponíveis: "edge_tts" (grátis, neural Microsoft) | "fish_audio" (pago)
+  engine: "fish_audio"
+  volume: 0.9
+  edge_tts:
+    # Vozes PT-BR neurais: pt-BR-AntonioNeural (masc), pt-BR-FranciscaNeural (fem),
+    # pt-BR-ThalitaNeural (fem). Para Jarvis-style, use AntonioNeural.
+    voice: "pt-BR-AntonioNeural"
+    rate: "+0%"
+    pitch: "+0Hz"
+
+watchers:
+  gitlab:
+    enabled: true
+    poll_interval_seconds: 30
+
+tools:
+  spotify:
+    enabled: false
+  code_review:
+    enabled: false
+    skill: "code-review:code-review"
