@@ -497,6 +497,8 @@ const ingestCancelBtn = document.getElementById("ingestCancelBtn");
 let ingestActiveTab = "text";
 let ingestFileText = "";
 let ingestFileName = "";
+let ingestFileBlob = null;     // mantém o File para upload binário (PDF)
+let ingestFileIsBinary = false; // true → manda multipart pro server extrair
 
 function showIngestModal() {
   if (!ingestModal) return;
@@ -521,6 +523,8 @@ function resetIngestForm() {
   }
   ingestFileText = "";
   ingestFileName = "";
+  ingestFileBlob = null;
+  ingestFileIsBinary = false;
   if (ingestHint) ingestHint.textContent = "";
   switchIngestTab("text");
 }
@@ -550,19 +554,34 @@ if (ingestFile) {
     if (!f) {
       ingestFileText = "";
       ingestFileName = "";
+      ingestFileBlob = null;
+      ingestFileIsBinary = false;
       if (ingestFilePreview) {
         ingestFilePreview.textContent = "";
         ingestFilePreview.hidden = true;
       }
       return;
     }
+    ingestFileName = f.name;
+    ingestFileBlob = f;
+    const isPdf = /\.pdf$/i.test(f.name) || f.type === "application/pdf";
+    ingestFileIsBinary = isPdf;
     try {
-      ingestFileText = await f.text();
-      ingestFileName = f.name;
-      if (ingestFilePreview) {
-        const preview = ingestFileText.slice(0, 600);
-        ingestFilePreview.textContent = preview + (ingestFileText.length > 600 ? "\n…" : "");
-        ingestFilePreview.hidden = false;
+      if (isPdf) {
+        // PDF não é lido no browser — extração acontece no server.
+        ingestFileText = "";
+        if (ingestFilePreview) {
+          const sizeMb = (f.size / (1024 * 1024)).toFixed(2);
+          ingestFilePreview.textContent = `PDF • ${sizeMb} MB — texto será extraído no servidor.`;
+          ingestFilePreview.hidden = false;
+        }
+      } else {
+        ingestFileText = await f.text();
+        if (ingestFilePreview) {
+          const preview = ingestFileText.slice(0, 600);
+          ingestFilePreview.textContent = preview + (ingestFileText.length > 600 ? "\n…" : "");
+          ingestFilePreview.hidden = false;
+        }
       }
     } catch (err) {
       ingestHint.textContent = `Falha lendo arquivo: ${err.message}`;
@@ -574,12 +593,49 @@ async function submitIngest(e) {
   e.preventDefault();
   if (!ingestForm) return;
 
-  let content;
   let suggestedTitle = (ingestTitle && ingestTitle.value || "").trim();
+  const category = (ingestCategory && ingestCategory.value) || "conhecimento";
+  const isBinaryFile = ingestActiveTab === "file" && ingestFileIsBinary && ingestFileBlob;
+
+  // PDF (e qualquer binário futuro): multipart pro server extrair.
+  if (isBinaryFile) {
+    if (!suggestedTitle && ingestFileName) {
+      suggestedTitle = ingestFileName.replace(/\.[^.]+$/, "");
+    }
+    const fd = new FormData();
+    fd.append("file", ingestFileBlob, ingestFileName);
+    fd.append("category", category);
+    if (suggestedTitle) fd.append("title", suggestedTitle);
+
+    ingestSubmit.disabled = true;
+    ingestHint.textContent = "Extraindo texto e ingerindo...";
+    try {
+      const r = await fetch("/api/vault/ingest_file", { method: "POST", body: fd });
+      if (!r.ok) {
+        const detail = await r.text();
+        throw new Error(detail || `HTTP ${r.status}`);
+      }
+      const data = await r.json();
+      hideIngestModal();
+      resetIngestForm();
+      const where = data.rel_path || "vault";
+      const cat = data.category ? ` [${data.category}]` : "";
+      const warn = data.warning ? ` (aviso: ${data.warning})` : "";
+      showToast(`Aprendido em ${where}${cat}${warn}`);
+      refreshVaultEverywhere();
+    } catch (err) {
+      ingestHint.textContent = `Falha: ${err.message}`;
+    } finally {
+      ingestSubmit.disabled = false;
+    }
+    return;
+  }
+
+  // Caminho texto/markdown (mesmo de antes).
+  let content;
   if (ingestActiveTab === "file") {
     content = ingestFileText.trim();
     if (!suggestedTitle && ingestFileName) {
-      // Cai pro nome do arquivo sem extensão se o usuário não digitar título.
       suggestedTitle = ingestFileName.replace(/\.[^.]+$/, "");
     }
   } else {
@@ -589,8 +645,6 @@ async function submitIngest(e) {
     ingestHint.textContent = "Cole texto ou selecione um arquivo.";
     return;
   }
-
-  const category = (ingestCategory && ingestCategory.value) || "conhecimento";
 
   ingestSubmit.disabled = true;
   ingestHint.textContent = "Ingerindo...";

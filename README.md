@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./server/ui/static/favicon.svg" alt="Jarvis" width="120" />
 
-  <h3>Assistente pessoal local com cérebro em Obsidian e cara de cockpit</h3>
+  <h3>Assistente pessoal local com cérebro em Obsidian</h3>
   <p>Voz, push-to-talk, watchers, ferramentas plugáveis e memória persistente em Markdown.<br/>Inspirado no J.A.R.V.I.S. de Tony Stark — só que rodando em <code>localhost</code> e atendendo a Senhora Bárbara.</p>
 
   <br/>
@@ -251,34 +251,6 @@ O Jarvis usa um vault de markdown como memória persistente. Tudo é arquivo `.m
 
 **Abrir no Obsidian:** Open folder as vault → aponte para `~/Documents/jarvis-vault`. O graph view nativo mostra wikilinks `[[X]]` entre notas. O painel `[ • OBSIDIAN BRAIN ]` da Mega-Brain replica isso em 2D.
 
-## Endpoints da API
-
-| Método | Rota | Descrição |
-|---|---|---|
-| `GET`  | `/` | UI SPA cockpit (HTML com cache-buster `?v=<mtime>` automático) |
-| `WS`   | `/ws` | Stream do EventBus (status, fala, watchers, agente) |
-| `POST` | `/api/command` | Texto da Home → dispatcher local + fallback agente |
-| `POST` | `/api/voice` | PCM 16kHz int16 do botão de mic da UI |
-| `GET/PATCH` | `/api/config` | Lê e edita `config/jarvis.yaml` |
-| `GET` | `/api/secrets` | Lista catálogo + status de cada secret (sem expor valores) |
-| `GET` | `/api/secrets/{key}/reveal` | Retorna valor cru de UMA secret. **Localhost-only** |
-| `PATCH` | `/api/secrets` | `{updates: {KEY: value\|null}}` — atualiza/remove no `.env`. **Localhost-only** |
-| `GET/PUT` | `/api/mcps` | Lista/substitui MCPs configurados |
-| `POST` | `/api/mcps/reload` | Reconecta servidores MCP |
-| `GET/PUT` | `/api/commands` | Comandos custom |
-| `GET` | `/api/commands/catalog` | Catálogo de tools.actions disponíveis |
-| `GET` | `/api/vault/stats` | Notas, wikilinks, ingestões hoje/7d, última nota aprendida |
-| `GET` | `/api/vault/graph` | `{nodes, edges}` para o `OBSIDIAN BRAIN` |
-| `POST` | `/api/vault/synthesize` | Síntese — propostas de promoção |
-| `POST` | `/api/vault/apply` | Aplica patch aprovado em `perfil/`/`projetos/`/`decisoes/` |
-| `POST` | `/api/vault/ingest` | `{title?, content, category, tags?, source?}` → `<categoria>/YYYY-MM-DD-slug.md` |
-| `POST` | `/api/briefing/run` | Dispara o briefing matinal manualmente |
-| `GET` | `/api/status` | Capabilities ativas (stt, agent, vault, etc.) |
-
-## Modos de pensamento (legacy)
-
-O `core/agent.py` ainda suporta 3 modos extras de prompt — Crítico, Sintetizador, Advogado — passados via parâmetro `mode` no `JarvisAgent.respond()`. A view Conversa que expunha eles foi consolidada na Mega-Brain; os modos seguem disponíveis no código mas sem UI dedicada por enquanto.
-
 ## Scripts
 
 | Script | Descrição |
@@ -290,31 +262,6 @@ O `core/agent.py` ainda suporta 3 modos extras de prompt — Crítico, Sintetiza
 | `py scripts/test_voice.py` | Smoke test TTS (fala uma frase) |
 | `py scripts/test_announce.py` | Roda 1 poll com state fresco — força anúncio de evento |
 | `py scripts/test_review_flow.py` | Smoke test do code review |
-
-## Roadmap
-
-- [x] Esqueleto + persona + TTS plugável (Edge / fish.audio)
-- [x] GitLab watcher (anúncios falados)
-- [x] Push-to-talk + STT (Vosk e faster-whisper)
-- [x] Wake word ("Jarvis") com pausa enquanto fala
-- [x] Tools nativas: Spotify, GitLab, code review
-- [x] MCP registry multi-servidor com hot reload pela UI
-- [x] Agente com tool-calling, prompt caching, sessão
-- [x] Vault Obsidian — perfil, projetos, decisões, interações, conhecimento
-- [x] Briefing matinal automatizado
-- [x] Synthesizer (promoção curada com aprovação manual)
-- [x] UI cockpit (SYSTEMS, VAULT OVERVIEW, OBSIDIAN BRAIN graph 2D)
-- [x] Mega-Brain consolidada (métricas + grafo + agentes + comandos)
-- [x] Modal de ingestão estilo MEGA-BRAIN (tabs Texto/Arquivo + categoria)
-- [x] Configurações em sub-abas (Geral / Credenciais / Voz / Motor / Tools)
-- [x] Painel de Credenciais com bullets cosméticos + revelação opt-in
-- [x] Abstração de motor LLM (Ollama local + Anthropic cloud, com prompt caching)
-- [ ] Tool `vault_search` — full-text/RAG no agente
-- [ ] Aba **Sessão** no modal de ingestão (ingerir conversa atual)
-- [ ] Ingestão de URL (fetch + readability → markdown)
-- [ ] Ingestão de PDF (`pypdf` → markdown)
-- [ ] Validador de credencial (botão "Testar" no painel — chamada barata pra confirmar que a key funciona)
-- [ ] Modos de pensamento de volta na UI (chip ou prefixo de comando)
 
 ## Licença
 

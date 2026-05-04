@@ -21,7 +21,16 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -363,6 +372,86 @@ def create_app(
             "title": title,
         }
 
+    @app.post("/api/vault/ingest_file")
+    async def vault_ingest_file(
+        file: UploadFile = File(...),
+        title: str | None = Form(None),
+        category: str = Form("conhecimento"),
+        tags: str = Form(""),  # CSV
+    ) -> dict:
+        """Ingestão a partir de arquivo binário (PDF) ou texto (md/txt).
+
+        Extrai texto do PDF com pypdf no servidor e reusa `vault.ingest_knowledge`.
+        Limite de 200 MB pra evitar abuso. PDF escaneado (sem camada de texto)
+        retorna warning porque pypdf não faz OCR.
+        """
+        vault = vault_provider() if vault_provider else None
+        if vault is None:
+            raise HTTPException(status_code=503, detail="vault indisponível")
+
+        MAX_BYTES = 200 * 1024 * 1024
+        raw = await file.read()
+        if len(raw) > MAX_BYTES:
+            raise HTTPException(status_code=413, detail="arquivo > 200 MB")
+        if not raw:
+            raise HTTPException(status_code=400, detail="arquivo vazio")
+
+        filename = file.filename or "arquivo"
+        suffix = Path(filename).suffix.lower()
+        warning: str | None = None
+
+        if suffix == ".pdf" or (file.content_type or "").lower() == "application/pdf":
+            content, warning = await asyncio.to_thread(_extract_pdf_text, raw)
+            if not content.strip():
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "PDF sem texto extraível (provavelmente escaneado). "
+                        "OCR não está disponível — converta manualmente ou cole o texto."
+                    ),
+                )
+        elif suffix in (".md", ".txt") or (file.content_type or "").startswith("text/"):
+            try:
+                content = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                content = raw.decode("latin-1", errors="replace")
+        else:
+            raise HTTPException(
+                status_code=415,
+                detail=f"tipo de arquivo não suportado: {suffix or file.content_type}",
+            )
+
+        cat = (category or "conhecimento").strip().lower()
+        suggested = (title or "").strip() or Path(filename).stem
+        clean_tags = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+
+        try:
+            path = await asyncio.to_thread(
+                vault.ingest_knowledge,
+                suggested,
+                content,
+                tags=clean_tags,
+                source=f"arquivo:{filename}",
+                category=cat,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        try:
+            rel = path.relative_to(vault.root).as_posix()
+        except ValueError:
+            rel = path.name
+
+        return {
+            "ok": True,
+            "path": str(path),
+            "rel_path": rel,
+            "category": cat,
+            "title": suggested,
+            "warning": warning,
+            "chars": len(content),
+        }
+
     @app.post("/api/vault/apply")
     async def vault_apply(payload: VaultApplyIn) -> dict:
         vault = vault_provider() if vault_provider else None
@@ -449,3 +538,39 @@ def _serialize(event: Event) -> dict:
         "data": event.data,
         "timestamp": event.timestamp,
     }
+
+
+def _extract_pdf_text(raw: bytes) -> tuple[str, str | None]:
+    """Extrai texto de um PDF em bytes. Retorna (texto, warning_ou_None).
+
+    pypdf não faz OCR — PDFs escaneados/só-imagem retornam texto vazio.
+    O warning sinaliza se o aproveitamento foi baixo (poucos chars/página)
+    pra UI poder avisar o usuário sem bloquear.
+    """
+    import io
+
+    from pypdf import PdfReader  # import lazy: só carrega quando alguém envia PDF
+
+    try:
+        reader = PdfReader(io.BytesIO(raw))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"PDF inválido: {e}")
+
+    parts: list[str] = []
+    for page in reader.pages:
+        try:
+            txt = page.extract_text() or ""
+        except Exception:
+            txt = ""
+        if txt.strip():
+            parts.append(txt.strip())
+
+    text = "\n\n".join(parts)
+    pages = max(1, len(reader.pages))
+    warning: str | None = None
+    if text and len(text) / pages < 50:
+        warning = (
+            f"texto extraído curto (~{len(text) // pages} chars/página) — "
+            "PDF pode ser escaneado/parcialmente imagem"
+        )
+    return text, warning
