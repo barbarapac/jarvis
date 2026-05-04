@@ -29,6 +29,13 @@ class EventType(str, Enum):
     COMMAND_DISPATCHED = "command_dispatched"
     REVIEW_STARTED = "review_started"
     REVIEW_FINISHED = "review_finished"
+    # Agente — task surface visível na UI
+    AGENT_TURN_STARTED = "agent_turn_started"   # data: {user_text}
+    AGENT_THINKING = "agent_thinking"           # data: {label}  (ex: "consultando ferramentas...")
+    AGENT_TOOL_CALL = "agent_tool_call"         # data: {tool, args_preview, call_id}
+    AGENT_TOOL_RESULT = "agent_tool_result"     # data: {tool, result_preview, call_id, error}
+    AGENT_TURN_ENDED = "agent_turn_ended"       # data: {assistant_text, tools_used}
+    JARVIS_INITIATIVE = "jarvis_initiative"     # data: {label, text} — Jarvis fala primeiro
     LOG = "log"  # mensagem genérica
 
 
