@@ -70,6 +70,13 @@ commands:
     tool: spotify
     action: current
     params: {}
+  - trigger: to triste
+    description: toca playlist quando estou triste
+    tool: spotify
+    action: play_playlist
+    params:
+      playlist:
+        https://open.spotify.com/playlist/37i9dQZF1DZ06evO49hLQA?si=b54f709b40364c09
   - trigger: Oi jarvis
     description: Saudação inicial (varia com a hora)
     tool: persona
