@@ -155,12 +155,28 @@ class MCPManager:
             ]
 
     def list_tools_for_anthropic(self) -> list[dict[str, Any]]:
-        """Lista de tools no formato esperado pelo SDK Anthropic."""
+        """Lista de tools no formato esperado pelo SDK Anthropic.
+
+        Dedupa por nome — a API da Anthropic rejeita o request inteiro se
+        houver tools com nomes repetidos. Mantém a primeira ocorrência e
+        loga as colisões pra ficar visível qual server foi ignorado.
+        """
         with self._lock:
             tools: list[dict[str, Any]] = []
+            seen: set[str] = set()
             for rt in self._servers.values():
-                if rt.error is None and rt.config.enabled:
-                    tools.extend(rt.tools)
+                if rt.error is not None or not rt.config.enabled:
+                    continue
+                for t in rt.tools:
+                    name = t["name"]
+                    if name in seen:
+                        print(
+                            f"[mcp] tool duplicada ignorada: {name!r} "
+                            f"de {rt.config.name!r}"
+                        )
+                        continue
+                    seen.add(name)
+                    tools.append(t)
             return tools
 
     def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
