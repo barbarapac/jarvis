@@ -25,17 +25,13 @@
           <span class="nav-icon">◉</span>
           <span class="nav-label">Home</span>
         </button>
+        <button class="nav-item" data-view="megabrain">
+          <span class="nav-icon">✦</span>
+          <span class="nav-label">Mega-Brain</span>
+        </button>
         <button class="nav-item" data-view="history">
           <span class="nav-icon">≡</span>
           <span class="nav-label">Histórico</span>
-        </button>
-        <button class="nav-item" data-view="tools">
-          <span class="nav-icon">⚙</span>
-          <span class="nav-label">Ferramentas</span>
-        </button>
-        <button class="nav-item" data-view="commands">
-          <span class="nav-icon">✦</span>
-          <span class="nav-label">Comandos</span>
         </button>
         <button class="nav-item" data-view="settings">
           <span class="nav-icon">⚒</span>
@@ -53,7 +49,23 @@
 
       <!-- ========== HOME ========== -->
       <section class="view view-home active" data-view="home">
-        <div class="reactor-stage">
+        <div class="home-cockpit">
+          <!-- Coluna esquerda: SYSTEMS -->
+          <aside class="panel home-systems">
+            <div class="panel-header"><span class="panel-title">Systems</span></div>
+            <div class="hud-row sys-clock">
+              <span class="hud-val cyan" id="sysDate">—</span>
+              <span class="hud-val gold" id="sysTime">—</span>
+            </div>
+            <div class="status-line"><span class="status-label"><span class="status-dot off" id="dotAgent"></span>Agente</span><span class="status-value off" id="valAgent">offline</span></div>
+            <div class="status-line"><span class="status-label"><span class="status-dot off" id="dotStt"></span>Voz</span><span class="status-value off" id="valStt">offline</span></div>
+            <div class="status-line"><span class="status-label"><span class="status-dot off" id="dotVault"></span>Vault</span><span class="status-value off" id="valVault">—</span></div>
+            <div class="status-line"><span class="status-label"><span class="status-dot off" id="dotSpotify"></span>Spotify</span><span class="status-value off" id="valSpotify">offline</span></div>
+            <div class="status-line"><span class="status-label"><span class="status-dot off" id="dotWake"></span>Wake-word</span><span class="status-value off" id="valWake">off</span></div>
+          </aside>
+
+          <!-- Centro: reator + composer -->
+          <div class="reactor-stage">
           <!-- O reator grande, em SVG. O JS adiciona/remove classes pra estados. -->
           <div class="big-reactor" id="bigReactor">
             <svg viewBox="0 0 400 400" class="reactor-svg" aria-hidden="true">
@@ -145,8 +157,96 @@
             />
             <button id="send" type="submit">▶</button>
           </form>
-        </div>
+          </div><!-- /.reactor-stage -->
+
+          <!-- Coluna direita: VAULT OVERVIEW -->
+          <aside class="panel panel-gold home-overview">
+            <div class="panel-header"><span class="panel-title">Vault overview</span></div>
+            <div class="overview-stats">
+              <div class="stat-pill"><span class="stat-num" id="ovNotes">—</span><span class="stat-key">notas</span></div>
+              <div class="stat-pill"><span class="stat-num" id="ovLinks">—</span><span class="stat-key">links</span></div>
+              <div class="stat-pill"><span class="stat-num" id="ovToday">—</span><span class="stat-key">hoje</span></div>
+              <div class="stat-pill"><span class="stat-num" id="ovWeek">—</span><span class="stat-key">7d</span></div>
+            </div>
+            <div class="overview-actions">
+              <button class="btn-cockpit gold" id="openObsidianBtn" type="button" title="Abre o vault no Obsidian (precisa de Open Folder As Vault feito antes)">Abrir Obsidian</button>
+              <button class="btn-cockpit" id="openExplorerBtn" type="button" title="Abrir pasta no Explorador">Pasta</button>
+            </div>
+            <div class="overview-path" id="ovPath"></div>
+          </aside>
+        </div><!-- /.home-cockpit -->
       </section>
+
+      <!-- ========== MODAL DE SÍNTESE ========== -->
+      <div class="modal-overlay" id="synthModal" style="display:none;">
+        <div class="modal">
+          <header class="modal-header">
+            <h3>Propostas de memória</h3>
+            <button class="modal-close" id="synthClose" type="button" aria-label="Fechar">×</button>
+          </header>
+          <div class="modal-body" id="synthBody">
+            <div class="synth-loading">Pensando, Senhora...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========== MODAL DE INGESTÃO ========== -->
+      <div class="modal-overlay" id="ingestModal" style="display:none;">
+        <div class="modal modal-mega">
+          <header class="modal-header">
+            <h3><span class="modal-dot"></span> Mega-Brain — Ingestão de conhecimento</h3>
+            <button class="modal-close" id="ingestClose" type="button" aria-label="Fechar">×</button>
+          </header>
+          <form class="modal-body ingest-form" id="ingestForm">
+            <div class="ingest-tabs" role="tablist">
+              <button type="button" class="ingest-tab active" data-tab="text" role="tab" aria-selected="true">Texto</button>
+              <button type="button" class="ingest-tab" data-tab="file" role="tab" aria-selected="false">Arquivo</button>
+              <button type="button" class="ingest-tab disabled" data-tab="session" role="tab" aria-selected="false" disabled title="Em breve — V2">Sessão</button>
+            </div>
+
+            <!-- ABA: Texto -->
+            <div class="ingest-pane active" data-pane="text">
+              <label class="ingest-field">
+                <span>Cole ou digite o conhecimento</span>
+                <textarea id="ingestContent" rows="10" placeholder="Ex: Meu cliente principal é a empresa X, setor de tecnologia, faturamento R$ 2M/ano..."></textarea>
+              </label>
+            </div>
+
+            <!-- ABA: Arquivo -->
+            <div class="ingest-pane" data-pane="file">
+              <label class="ingest-field">
+                <span>Selecione um arquivo (.md, .txt)</span>
+                <input type="file" id="ingestFile" accept=".md,.txt,text/plain,text/markdown"/>
+              </label>
+              <div class="ingest-file-preview" id="ingestFilePreview" hidden></div>
+            </div>
+
+            <!-- Comum -->
+            <label class="ingest-field">
+              <span>Categoria</span>
+              <select id="ingestCategory">
+                <option value="conhecimento">Conhecimento — referência geral, indexada pelo Obsidian (não entra no prompt do agente)</option>
+                <option value="perfil">Perfil — fatos sobre você (entra no system prompt do Jarvis)</option>
+                <option value="projetos">Projetos — trabalho em andamento (entra no system prompt do Jarvis)</option>
+                <option value="decisoes">Decisões — escolhas com motivo (referência, não entra no prompt)</option>
+              </select>
+            </label>
+            <label class="ingest-field">
+              <span>Título <small>(opcional — IA gera se vazio)</small></span>
+              <input type="text" id="ingestTitle" placeholder="ex: Padrão de retry exponencial em filas RabbitMQ"/>
+            </label>
+
+            <div class="ingest-actions">
+              <button type="button" class="btn-cockpit" id="ingestCancelBtn">Cancelar</button>
+              <button type="submit" class="btn-cockpit cyan-fill" id="ingestSubmit">✦ Ingerir no Obsidian</button>
+              <span class="save-hint" id="ingestHint"></span>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- ========== TOAST ========== -->
+      <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
       <!-- ========== HISTÓRICO ========== -->
       <section class="view view-history" data-view="history">
@@ -157,75 +257,139 @@
         <div class="transcript" id="transcript"></div>
       </section>
 
-      <!-- ========== FERRAMENTAS / MCPs ========== -->
-      <section class="view view-tools" data-view="tools">
-        <header class="view-header">
-          <h2>Ferramentas (MCPs)</h2>
-          <p class="view-subtitle">
-            Servidores MCP que o Jarvis pode invocar via Claude.
-            Estilo Claude Desktop: <code>command</code>, <code>args</code>, <code>env</code>.
-          </p>
+      <!-- ========== MEGA-BRAIN ========== -->
+      <section class="view view-megabrain" data-view="megabrain">
+        <header class="view-header mb-header">
+          <div>
+            <h2>Mega-Brain</h2>
+            <p class="view-subtitle">
+              O cérebro do Jarvis vive aqui. Ele aprende com tudo que você ingere no Obsidian
+              e consulta sozinho quando precisa responder.
+            </p>
+          </div>
+          <div class="mb-header-actions">
+            <button id="ingestBtn" class="btn-cockpit" type="button" title="Adicionar conhecimento ao cérebro">
+              ✦ Ingerir conhecimento
+            </button>
+            <button id="synthBtn" class="btn-cockpit gold" type="button" title="Promover fatos das interações pra perfil/projetos">
+              ✦ Sintetizar memórias
+            </button>
+          </div>
         </header>
 
-        <div class="mcp-list" id="mcpList"></div>
-
-        <div class="card mcp-add">
-          <h3>Adicionar servidor</h3>
-          <div class="form-grid">
-            <label>Nome
-              <input type="text" id="mcpName" placeholder="ex: filesystem"/>
-            </label>
-            <label>Comando
-              <input type="text" id="mcpCommand" placeholder="ex: npx"/>
-            </label>
-            <label class="full">Args (um por linha)
-              <textarea id="mcpArgs" rows="3" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;C:\\Users\\barbara.pacheco\\Documents"></textarea>
-            </label>
-            <label class="full">Env (KEY=VALOR, um por linha)
-              <textarea id="mcpEnv" rows="2" placeholder="API_KEY=abc"></textarea>
-            </label>
+        <!-- MÉTRICAS -->
+        <div class="mb-metrics">
+          <div class="metric-tile">
+            <span class="metric-num" id="mbNotes">—</span>
+            <span class="metric-key">notas</span>
           </div>
-          <div class="actions">
-            <button class="btn-primary" id="mcpAdd" type="button">Adicionar</button>
-            <button class="btn-ghost" id="mcpReload" type="button">Recarregar conexões</button>
+          <div class="metric-tile">
+            <span class="metric-num" id="mbLinks">—</span>
+            <span class="metric-key">wikilinks</span>
+          </div>
+          <div class="metric-tile">
+            <span class="metric-num gold" id="mbToday">—</span>
+            <span class="metric-key">ingestões hoje</span>
+          </div>
+          <div class="metric-tile">
+            <span class="metric-num gold" id="mbWeek">—</span>
+            <span class="metric-key">ingestões 7d</span>
+          </div>
+          <div class="metric-tile">
+            <span class="metric-num cyan" id="mbMcps">—</span>
+            <span class="metric-key">MCPs conectados</span>
+          </div>
+          <div class="metric-tile">
+            <span class="metric-num cyan" id="mbInteracoes">—</span>
+            <span class="metric-key">interações hoje</span>
           </div>
         </div>
-      </section>
 
-      <!-- ========== COMANDOS ========== -->
-      <section class="view view-commands" data-view="commands">
-        <header class="view-header">
-          <h2>Comandos</h2>
-          <p class="view-subtitle">
-            Frases que o Jarvis reconhece. Cada comando dispara uma ação numa ferramenta.
-            Built-ins (pausa, próxima, etc.) já funcionam sem cadastro.
-          </p>
-        </header>
-
-        <div class="cmd-list" id="cmdList"></div>
-
-        <div class="card cmd-add">
-          <h3>Adicionar comando</h3>
-          <div class="form-grid">
-            <label class="full">Gatilho (frase)
-              <input type="text" id="cmdTrigger" placeholder="ex: modo foco"/>
-            </label>
-            <label class="full">Descrição
-              <input type="text" id="cmdDescription" placeholder="o que esse comando faz"/>
-            </label>
-            <label>Ferramenta
-              <select id="cmdTool"></select>
-            </label>
-            <label>Ação
-              <select id="cmdAction"></select>
-            </label>
-            <div class="full" id="cmdParams"></div>
+        <!-- OBSIDIAN BRAIN -->
+        <div class="panel mb-section">
+          <div class="panel-header">
+            <span class="panel-title">Obsidian Brain</span>
+            <span class="panel-meta" id="brainMeta">— notas · — links</span>
           </div>
-          <div class="actions">
-            <button class="btn-primary" id="cmdAdd" type="button">Adicionar</button>
-            <button class="btn-ghost" id="cmdCancel" type="button" style="display:none">Cancelar</button>
-            <span class="save-hint" id="cmdHint"></span>
+          <div class="brain-graph-wrap">
+            <svg id="brainGraph" viewBox="0 0 800 320" preserveAspectRatio="xMidYMid meet" aria-label="Grafo do vault"></svg>
+            <div class="brain-empty" id="brainEmpty" hidden>Cérebro vazio. Adicione notas em <code>conhecimento/</code> ou crie wikilinks <code>[[outra nota]]</code> nas suas notas.</div>
           </div>
+          <div class="brain-legend">
+            <span class="legend-item"><span class="legend-dot" style="background:#00d4ff"></span>perfil</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#f5c453"></span>projetos</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#c084fc"></span>decisões</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#6abf6a"></span>conhecimento</span>
+          </div>
+          <div class="mb-recent" id="mbRecent" hidden>
+            <div class="mb-recent-head">Última coisa aprendida</div>
+            <div class="mb-recent-body">
+              <div class="mb-recent-title" id="mbRecentTitle">—</div>
+              <div class="mb-recent-meta" id="mbRecentMeta">—</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AGENTES / MCPs -->
+        <div class="panel mb-section">
+          <div class="panel-header">
+            <span class="panel-title">Agentes (MCPs)</span>
+            <span class="panel-meta">servidores que o Jarvis pode invocar</span>
+          </div>
+          <div class="mcp-list" id="mcpList"></div>
+          <details class="mb-add">
+            <summary>+ Adicionar servidor</summary>
+            <div class="form-grid">
+              <label>Nome
+                <input type="text" id="mcpName" placeholder="ex: filesystem"/>
+              </label>
+              <label>Comando
+                <input type="text" id="mcpCommand" placeholder="ex: npx"/>
+              </label>
+              <label class="full">Args (um por linha)
+                <textarea id="mcpArgs" rows="3" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;C:\\Users\\barbara.pacheco\\Documents"></textarea>
+              </label>
+              <label class="full">Env (KEY=VALOR, um por linha)
+                <textarea id="mcpEnv" rows="2" placeholder="API_KEY=abc"></textarea>
+              </label>
+            </div>
+            <div class="actions">
+              <button class="btn-primary" id="mcpAdd" type="button">Adicionar</button>
+              <button class="btn-ghost" id="mcpReload" type="button">Recarregar conexões</button>
+            </div>
+          </details>
+        </div>
+
+        <!-- COMANDOS DE VOZ -->
+        <div class="panel mb-section">
+          <div class="panel-header">
+            <span class="panel-title">Comandos de voz</span>
+            <span class="panel-meta">frases custom que disparam ações</span>
+          </div>
+          <div class="cmd-list" id="cmdList"></div>
+          <details class="mb-add">
+            <summary>+ Adicionar comando</summary>
+            <div class="form-grid">
+              <label class="full">Gatilho (frase)
+                <input type="text" id="cmdTrigger" placeholder="ex: modo foco"/>
+              </label>
+              <label class="full">Descrição
+                <input type="text" id="cmdDescription" placeholder="o que esse comando faz"/>
+              </label>
+              <label>Ferramenta
+                <select id="cmdTool"></select>
+              </label>
+              <label>Ação
+                <select id="cmdAction"></select>
+              </label>
+              <div class="full" id="cmdParams"></div>
+            </div>
+            <div class="actions">
+              <button class="btn-primary" id="cmdAdd" type="button">Adicionar</button>
+              <button class="btn-ghost" id="cmdCancel" type="button" style="display:none">Cancelar</button>
+              <span class="save-hint" id="cmdHint"></span>
+            </div>
+          </details>
         </div>
       </section>
 
@@ -239,116 +403,187 @@
           </p>
         </header>
 
-        <div class="card">
-          <h3>Usuária</h3>
-          <div class="form-grid">
-            <label>Nome
-              <input type="text" data-cfg="user.name"/>
-            </label>
-            <label>Tratamento
-              <input type="text" data-cfg="user.honorific"/>
-            </label>
+        <div class="settings-tabs" role="tablist">
+          <button class="settings-tab active" data-stab="general" role="tab" aria-selected="true">Geral</button>
+          <button class="settings-tab" data-stab="secrets" role="tab" aria-selected="false">Credenciais</button>
+          <button class="settings-tab" data-stab="voice" role="tab" aria-selected="false">Voz</button>
+          <button class="settings-tab" data-stab="motor" role="tab" aria-selected="false">Motor</button>
+          <button class="settings-tab" data-stab="tools" role="tab" aria-selected="false">Tools</button>
+        </div>
+
+        <div class="settings-pane active" data-spane="general">
+          <div class="settings-grid">
+            <div class="panel">
+              <div class="panel-header"><span class="panel-title">Identidade</span></div>
+              <div class="form-grid">
+                <label>Nome
+                  <input type="text" data-cfg="user.name"/>
+                </label>
+                <label>Tratamento
+                  <input type="text" data-cfg="user.honorific"/>
+                </label>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="card">
-          <h3>Voz (TTS) <span class="restart-badge" title="exige restart">↻</span></h3>
-          <div class="form-grid">
-            <label>Engine
-              <select data-cfg="narrator.engine">
-                <option value="edge_tts">edge_tts (grátis)</option>
-                <option value="fish_audio">fish_audio (pago)</option>
-              </select>
-            </label>
-            <label>Volume
-              <input type="number" step="0.05" min="0" max="1" data-cfg="narrator.volume"/>
-            </label>
-            <label>Edge voice
-              <input type="text" data-cfg="narrator.edge_tts.voice"/>
-            </label>
-            <label>Edge rate
-              <input type="text" data-cfg="narrator.edge_tts.rate" placeholder="+0%"/>
-            </label>
-            <label>Edge pitch
-              <input type="text" data-cfg="narrator.edge_tts.pitch" placeholder="+0Hz"/>
-            </label>
+        <div class="settings-pane" data-spane="secrets">
+          <div class="settings-grid">
+            <div class="panel panel-secrets">
+              <div class="panel-header">
+                <span class="panel-title">Credenciais</span>
+                <span class="restart-badge" title="exige restart">↻</span>
+              </div>
+              <div class="secrets-list" id="secretsList">
+                <div class="secrets-loading">Carregando…</div>
+              </div>
+              <p class="card-hint">
+                Salvas em <code>.env</code> local. Endpoint só atende em <code>127.0.0.1</code> — nunca trafega na rede.
+              </p>
+            </div>
           </div>
         </div>
 
-        <div class="card">
-          <h3>Hotkey <span class="restart-badge" title="exige restart">↻</span></h3>
-          <div class="form-grid">
-            <label class="full">Push-to-talk
-              <input type="text" data-cfg="hotkey.push_to_talk" placeholder="<ctrl>+<alt>+j"/>
-            </label>
+        <div class="settings-pane" data-spane="voice">
+          <div class="settings-grid">
+            <div class="panel">
+              <div class="panel-header">
+                <span class="panel-title">Voz · TTS</span>
+                <span class="restart-badge" title="exige restart">↻</span>
+              </div>
+              <div class="form-grid">
+                <label>Engine
+                  <select data-cfg="narrator.engine">
+                    <option value="edge_tts">edge_tts (grátis)</option>
+                    <option value="fish_audio">fish_audio (pago)</option>
+                  </select>
+                </label>
+                <label>Volume
+                  <input type="number" step="0.05" min="0" max="1" data-cfg="narrator.volume"/>
+                </label>
+                <label>Edge voice
+                  <input type="text" data-cfg="narrator.edge_tts.voice"/>
+                </label>
+                <label>Edge rate
+                  <input type="text" data-cfg="narrator.edge_tts.rate" placeholder="+0%"/>
+                </label>
+                <label>Edge pitch
+                  <input type="text" data-cfg="narrator.edge_tts.pitch" placeholder="+0Hz"/>
+                </label>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header">
+                <span class="panel-title">Hotkey</span>
+                <span class="restart-badge" title="exige restart">↻</span>
+              </div>
+              <div class="form-grid">
+                <label class="full">Push-to-talk
+                  <input type="text" data-cfg="hotkey.push_to_talk" placeholder="<ctrl>+<alt>+j"/>
+                </label>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header">
+                <span class="panel-title">Wake word</span>
+                <span class="restart-badge" title="exige restart">↻</span>
+              </div>
+              <div class="form-grid">
+                <label class="checkbox">
+                  <input type="checkbox" data-cfg="wake_word.enabled"/>
+                  Ativar escuta contínua por "Jarvis"
+                </label>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="card">
-          <h3>Wake word <span class="restart-badge" title="exige restart">↻</span></h3>
-          <div class="form-grid">
-            <label class="checkbox">
-              <input type="checkbox" data-cfg="wake_word.enabled"/>
-              Ativar escuta contínua por "Jarvis"
-            </label>
+        <div class="settings-pane" data-spane="motor">
+          <div class="settings-grid">
+            <div class="panel">
+              <div class="panel-header">
+                <span class="panel-title">Motor de raciocínio</span>
+                <span class="restart-badge" title="exige restart">↻</span>
+              </div>
+              <div class="form-grid">
+                <label class="checkbox full">
+                  <input type="checkbox" data-cfg="agent.enabled"/>
+                  Ativar motor (responde quando dispatch local não casa)
+                </label>
+                <label>Provider
+                  <select data-cfg="agent.provider">
+                    <option value="ollama">Ollama (local, grátis)</option>
+                    <option value="anthropic">Anthropic Claude (cloud, paga)</option>
+                  </select>
+                </label>
+                <label>Modelo
+                  <input type="text" data-cfg="agent.model" placeholder="llama3.2:3b"/>
+                </label>
+                <label class="full">Base URL <small>(só Ollama)</small>
+                  <input type="text" data-cfg="agent.base_url" placeholder="http://localhost:11434/v1"/>
+                </label>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="card">
-          <h3>Agente Claude <span class="restart-badge" title="exige restart">↻</span></h3>
-          <div class="form-grid">
-            <label class="checkbox">
-              <input type="checkbox" data-cfg="agent.enabled"/>
-              Usar Claude como fallback (precisa ANTHROPIC_API_KEY)
-            </label>
-            <label>Modelo
-              <input type="text" data-cfg="agent.model" placeholder="claude-opus-4-7"/>
-            </label>
+        <div class="settings-pane" data-spane="tools">
+          <div class="settings-grid">
+            <div class="panel">
+              <div class="panel-header">
+                <span class="panel-title">Watchers</span>
+                <span class="restart-badge" title="exige restart">↻</span>
+              </div>
+              <div class="form-grid">
+                <label class="checkbox">
+                  <input type="checkbox" data-cfg="watchers.gitlab.enabled"/>
+                  GitLab ativo
+                </label>
+                <label>Intervalo de poll (s)
+                  <input type="number" data-cfg="watchers.gitlab.poll_interval_seconds"/>
+                </label>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header">
+                <span class="panel-title">Spotify</span>
+                <span class="restart-badge" title="exige restart">↻</span>
+              </div>
+              <div class="form-grid">
+                <label class="checkbox">
+                  <input type="checkbox" data-cfg="tools.spotify.enabled"/>
+                  Habilitar
+                </label>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header">
+                <span class="panel-title">Code review</span>
+                <span class="restart-badge" title="exige restart">↻</span>
+              </div>
+              <div class="form-grid">
+                <label class="checkbox">
+                  <input type="checkbox" data-cfg="tools.code_review.enabled"/>
+                  Habilitar
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" data-cfg="tools.code_review.dry_run"/>
+                  Dry-run (não executa de verdade)
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" data-cfg="tools.code_review.auto_clone"/>
+                  Auto-clone de repositórios
+                </label>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="card">
-          <h3>Watchers <span class="restart-badge" title="exige restart">↻</span></h3>
-          <div class="form-grid">
-            <label class="checkbox">
-              <input type="checkbox" data-cfg="watchers.gitlab.enabled"/>
-              GitLab ativo
-            </label>
-            <label>Intervalo de poll (s)
-              <input type="number" data-cfg="watchers.gitlab.poll_interval_seconds"/>
-            </label>
-          </div>
-        </div>
-
-        <div class="card">
-          <h3>Spotify <span class="restart-badge" title="exige restart">↻</span></h3>
-          <div class="form-grid">
-            <label class="checkbox">
-              <input type="checkbox" data-cfg="tools.spotify.enabled"/>
-              Habilitar
-            </label>
-          </div>
-        </div>
-
-        <div class="card">
-          <h3>Code review <span class="restart-badge" title="exige restart">↻</span></h3>
-          <div class="form-grid">
-            <label class="checkbox">
-              <input type="checkbox" data-cfg="tools.code_review.enabled"/>
-              Habilitar
-            </label>
-            <label class="checkbox">
-              <input type="checkbox" data-cfg="tools.code_review.dry_run"/>
-              Dry-run (não executa de verdade)
-            </label>
-            <label class="checkbox">
-              <input type="checkbox" data-cfg="tools.code_review.auto_clone"/>
-              Auto-clone de repositórios
-            </label>
-          </div>
-        </div>
-
-        <div class="actions">
+        <div class="actions settings-actions">
           <button class="btn-primary" id="cfgSave" type="button">Salvar</button>
           <button class="btn-ghost" id="cfgReload" type="button">Recarregar</button>
           <span class="save-hint" id="cfgHint"></span>

@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -30,12 +30,19 @@ from core.command_registry import Tool, serialize_catalog
 from core.config_manager import ConfigManager
 from core.event_bus import Event, EventBus, EventType
 from core.mcp_manager import MCPManager, MCPServerConfig
+from core.secrets_manager import SecretsManager
+from core.vault import Vault
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
 
 
 class CommandIn(BaseModel):
     text: str
+
+
+class ConversationSendIn(BaseModel):
+    text: str
+    mode: str | None = None  # 'critico' | 'sintetizador' | 'advogado' | None
 
 
 class MCPServerIn(BaseModel):
@@ -62,6 +69,28 @@ class VoiceCommandListIn(BaseModel):
     commands: list[VoiceCommandIn]
 
 
+class VaultApplyIn(BaseModel):
+    file: str
+    action: str  # "append" | "replace" | "create"
+    content: str
+
+
+class SecretsUpdateIn(BaseModel):
+    # value=None ou "" remove a chave do .env
+    updates: dict[str, str | None]
+
+
+class VaultIngestIn(BaseModel):
+    title: str | None = None
+    content: str
+    tags: list[str] = []
+    source: str | None = None
+    # Pasta de destino: perfil / projetos / decisoes / conhecimento.
+    # Default cai no "conhecimento" — o agente NÃO consome essa pasta automaticamente,
+    # então é o lugar mais seguro pra notas avulsas.
+    category: str = "conhecimento"
+
+
 def create_app(
     *,
     event_bus: EventBus,
@@ -69,20 +98,57 @@ def create_app(
     audio_handler: Callable[[bytes], None] | None = None,
     config_manager: ConfigManager | None = None,
     mcp_manager: MCPManager | None = None,
+    secrets_manager: SecretsManager | None = None,
     capabilities_provider: Callable[[], dict[str, Any]] | None = None,
     tool_registry_provider: Callable[[], dict[str, Tool]] | None = None,
+    vault_provider: Callable[[], Vault | None] | None = None,
+    synthesizer_provider: Callable[[], Any | None] | None = None,
+    briefing_provider: Callable[[], Any | None] | None = None,
+    agent_invoker: Callable[[str, str | None], None] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Jarvis")
+
+    # No-cache em todos os assets servidos: o Jarvis é dev local e ninguém
+    # quer ficar batendo Ctrl+F5 quando o CSS/JS muda. Sem service worker
+    # registrado, basta dizer ao browser pra não guardar nada.
+    @app.middleware("http")
+    async def _no_cache_static(request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        if path == "/" or path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
 
     app.mount("/static", StaticFiles(directory=str(UI_DIR / "static")), name="static")
 
     @app.get("/")
-    async def index() -> FileResponse:
-        return FileResponse(UI_DIR / "index.html")
+    async def index() -> HTMLResponse:
+        # Lê o index e injeta ?v=<mtime> nos links de style/app pra que o
+        # WebView2 sempre pegue a versão atual mesmo se algum cache local
+        # decidir ignorar o no-store.
+        html = (UI_DIR / "index.html").read_text(encoding="utf-8")
+        for asset in ("style.css", "app.js"):
+            mtime = int((UI_DIR / "static" / asset).stat().st_mtime)
+            html = html.replace(f"/static/{asset}", f"/static/{asset}?v={mtime}")
+        return HTMLResponse(html)
 
     @app.post("/api/command")
     async def post_command(cmd: CommandIn) -> dict:
         await asyncio.to_thread(text_handler, cmd.text)
+        return {"ok": True}
+
+    @app.post("/api/conversation/send")
+    async def post_conversation_send(payload: ConversationSendIn) -> dict:
+        # Vai DIRETO no agente, sem dispatch local. A view Conversa é "falar
+        # com o agente"; comandos rápidos ficam na Home (/api/command).
+        if agent_invoker is None:
+            raise HTTPException(
+                status_code=503,
+                detail="agente indisponível (precisa ANTHROPIC_API_KEY)",
+            )
+        await asyncio.to_thread(agent_invoker, payload.text, payload.mode)
         return {"ok": True}
 
     @app.post("/api/voice")
@@ -110,6 +176,48 @@ def create_app(
             raise HTTPException(status_code=503, detail="config indisponível")
         updated = await asyncio.to_thread(config_manager.patch, payload)
         return updated
+
+    # ---------- Secrets (.env) ----------
+
+    @app.get("/api/secrets")
+    async def list_secrets() -> dict:
+        if secrets_manager is None:
+            raise HTTPException(status_code=503, detail="secrets indisponível")
+        items = await asyncio.to_thread(secrets_manager.status)
+        return {"items": items}
+
+    @app.get("/api/secrets/{key}/reveal")
+    async def reveal_secret(key: str, request: Request) -> dict:
+        # Mesmo guard do PATCH — só localhost pode pedir o valor cru. Cada
+        # chamada retorna o valor uma vez; a UI usa pra preencher o input
+        # quando o usuário clica em "Trocar" e re-esconde ao cancelar.
+        client_host = request.client.host if request.client else ""
+        if client_host not in ("127.0.0.1", "::1", "localhost"):
+            raise HTTPException(status_code=403, detail="apenas localhost pode revelar secrets")
+        if secrets_manager is None:
+            raise HTTPException(status_code=503, detail="secrets indisponível")
+        try:
+            value = await asyncio.to_thread(secrets_manager.get_value, key)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        return {"key": key, "value": value}
+
+    @app.patch("/api/secrets")
+    async def patch_secrets(payload: SecretsUpdateIn, request: Request) -> dict:
+        # Localhost-only — defense in depth (o servidor já bind em 127.0.0.1,
+        # mas se alguém mudar o host pra 0.0.0.0 sem querer, esse guard segura).
+        client_host = request.client.host if request.client else ""
+        if client_host not in ("127.0.0.1", "::1", "localhost"):
+            raise HTTPException(status_code=403, detail="apenas localhost pode editar secrets")
+        if secrets_manager is None:
+            raise HTTPException(status_code=503, detail="secrets indisponível")
+        try:
+            await asyncio.to_thread(secrets_manager.update, payload.updates)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        # Retorna status atualizado pra UI re-renderizar sem novo GET.
+        items = await asyncio.to_thread(secrets_manager.status)
+        return {"ok": True, "items": items}
 
     # ---------- Voice commands ----------
 
@@ -174,6 +282,116 @@ def create_app(
             raise HTTPException(status_code=503, detail="MCP manager indisponível")
         statuses = await asyncio.to_thread(mcp_manager.reload)
         return {"ok": True, "statuses": statuses, "servers": mcp_manager.list_status()}
+
+    # ---------- Conversa / Vault ----------
+
+    @app.get("/api/conversations/today")
+    async def conversations_today() -> dict:
+        vault = vault_provider() if vault_provider else None
+        if vault is None:
+            return {"turns": [], "available": False}
+        turns = await asyncio.to_thread(vault.read_today_turns)
+        return {"turns": turns, "available": True}
+
+    @app.post("/api/vault/synthesize")
+    async def vault_synthesize() -> dict:
+        vault = vault_provider() if vault_provider else None
+        synthesizer = synthesizer_provider() if synthesizer_provider else None
+        if vault is None:
+            raise HTTPException(status_code=503, detail="vault indisponível")
+        if synthesizer is None:
+            raise HTTPException(
+                status_code=503,
+                detail="synthesizer indisponível (precisa ANTHROPIC_API_KEY)",
+            )
+        try:
+            proposals = await asyncio.to_thread(synthesizer.synthesize)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"falha sintetizando: {e!r}")
+        return {"proposals": proposals}
+
+    @app.get("/api/vault/stats")
+    async def vault_stats() -> dict:
+        vault = vault_provider() if vault_provider else None
+        if vault is None:
+            raise HTTPException(status_code=503, detail="vault indisponível")
+        stats = await asyncio.to_thread(vault.stats)
+        return {"stats": stats, "root": str(vault.root)}
+
+    @app.get("/api/vault/graph")
+    async def vault_graph() -> dict:
+        vault = vault_provider() if vault_provider else None
+        if vault is None:
+            raise HTTPException(status_code=503, detail="vault indisponível")
+        return await asyncio.to_thread(vault.graph)
+
+    @app.post("/api/vault/ingest")
+    async def vault_ingest(payload: VaultIngestIn) -> dict:
+        vault = vault_provider() if vault_provider else None
+        if vault is None:
+            raise HTTPException(status_code=503, detail="vault indisponível")
+
+        category = (payload.category or "conhecimento").strip().lower()
+        title = (payload.title or "").strip()
+
+        # Sem título → heurística simples (primeiras palavras), sem IA.
+        if not title:
+            import re
+            cleaned = re.sub(r"\s+", " ", payload.content.strip())
+            title = cleaned[:60].rstrip(".,;:!?-—") or "Nota sem título"
+
+        try:
+            path = await asyncio.to_thread(
+                vault.ingest_knowledge,
+                title,
+                payload.content,
+                tags=list(payload.tags),
+                source=payload.source,
+                category=category,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        try:
+            rel = path.relative_to(vault.root).as_posix()
+        except ValueError:
+            rel = path.name
+        return {
+            "ok": True,
+            "path": str(path),
+            "rel_path": rel,
+            "category": category,
+            "title": title,
+        }
+
+    @app.post("/api/vault/apply")
+    async def vault_apply(payload: VaultApplyIn) -> dict:
+        vault = vault_provider() if vault_provider else None
+        if vault is None:
+            raise HTTPException(status_code=503, detail="vault indisponível")
+        try:
+            written = await asyncio.to_thread(
+                vault.write_curated_file,
+                payload.file,
+                payload.content,
+                mode=payload.action,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {"ok": True, "path": str(written)}
+
+    @app.post("/api/briefing/run")
+    async def briefing_run() -> dict:
+        briefing = briefing_provider() if briefing_provider else None
+        if briefing is None:
+            raise HTTPException(
+                status_code=503,
+                detail="briefing indisponível (precisa ANTHROPIC_API_KEY e agente habilitado)",
+            )
+        try:
+            text = await asyncio.to_thread(briefing.run)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"falha gerando briefing: {e!r}")
+        return {"ok": True, "text": text}
 
     # ---------- Status ----------
 
