@@ -43,14 +43,16 @@ BEEP_DURATION_MS = 80
 
 # Built-ins do Spotify — reconhecimento padrão por palavras-chave em PT-BR.
 _BUILTIN_KEYWORDS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    # "para" foi removido: era ambíguo com a preposição ("pra X", "para revisar").
+    # "para" e "por" foram removidos: ambíguos com preposições
+    # ("para revisar", "pesquisar por X") — STT não traz acento, então "por"
+    # vira sempre preposição e capturava o resto da frase como playlist.
     ("spotify", "pause", ("pausa", "pausar", "pause", "pare", "parar")),
     ("spotify", "resume", ("retoma", "retomar", "continua", "continuar", "play", "voltar a tocar")),
     ("spotify", "next", ("próxima", "proxima", "next", "skip", "pula", "pular")),
     ("spotify", "previous", ("anterior", "voltar", "volta", "previous")),
     ("spotify", "current", ("qual música", "qual musica", "que música", "que musica", "que canção", "que cancao")),
 )
-_PLAY_VERBS = ("toca", "tocar", "toque", "coloca", "colocar", "põe", "poe", "por", "bota", "botar", "manda")
+_PLAY_VERBS = ("toca", "tocar", "toque", "coloca", "colocar", "põe", "poe", "bota", "botar", "manda")
 _PLAY_PATTERN = re.compile(rf"\b(?:{'|'.join(re.escape(v) for v in _PLAY_VERBS)})\s+(.+?)$")
 
 # Pontuação removida antes do match (STT não devolve pontuação).
@@ -74,6 +76,7 @@ class VoiceCommander:
         agent: Optional[object] = None,  # JarvisAgent — duck-typed pra evitar import circular
         commands: Optional[list[dict]] = None,
         tool_registry: Optional[dict[str, Tool]] = None,
+        vault: Optional[object] = None,  # core.vault.Vault — duck-typed
     ) -> None:
         self._stt = stt
         self._narrator = narrator
@@ -81,7 +84,12 @@ class VoiceCommander:
         self._spotify = spotify
         self._event_bus = event_bus
         self._agent = agent
+        self._vault = vault
         self._busy_lock = threading.Lock()
+
+        # Tool/action mais recente que executou via dispatch local — usado
+        # pra anotar `tools_used` ao gravar a interação no vault.
+        self._last_local_tool: Optional[str] = None
 
         self._tools: dict[str, Tool] = tool_registry or {}
         # Lista normalizada de custom commands. Ordenada por tamanho do trigger
@@ -167,12 +175,24 @@ class VoiceCommander:
         self._dispatch_or_fallback(text)
 
     def _dispatch_or_fallback(self, text: str) -> None:
+        # Reseta o buffer de falas pra capturar só o que sair neste turno.
+        # Útil pro vault: se foi dispatch local, gravamos exatamente o que
+        # o Jarvis disse (Spotify confirmation, comando custom, etc.).
+        self._last_local_tool = None
+        try:
+            self._narrator.reset_spoken_buffer()
+        except AttributeError:
+            pass  # narrator que não suporta buffer (ex: DryRunNarrator)
+
         if self._dispatch_local(text.lower()):
+            self._record_turn(text, tools_used=[self._last_local_tool] if self._last_local_tool else None)
             return
         if self._agent is not None:
             try:
                 if self._event_bus:
                     self._event_bus.publish(EventType.STATUS, state="working")
+                # O agente já grava no vault internamente (via _commit_turn).
+                # Não duplicamos.
                 reply = self._agent.respond(text)
                 if reply:
                     self._narrator.speak(reply)
@@ -184,8 +204,31 @@ class VoiceCommander:
                 self._narrator.speak(
                     f"{self._persona.honorific}, falha consultando o cérebro: {e}."
                 )
+                # Erro do agente: agente NÃO gravou — gravamos aqui pra
+                # não perder a interação.
+                self._record_turn(text, tools_used=["agent_error"])
                 return
         self._narrator.speak(f"Comando não reconhecido, {self._persona.honorific}.")
+        self._record_turn(text, tools_used=["no_match"])
+
+    def _record_turn(self, user_text: str, tools_used: Optional[list[str]] = None) -> None:
+        """Registra a interação no vault. No-op se vault não estiver disponível."""
+        if self._vault is None:
+            return
+        try:
+            assistant_text = self._narrator.drain_spoken_buffer()
+        except AttributeError:
+            assistant_text = ""
+        if not assistant_text:
+            return  # Nada falado — não registra ruído.
+        try:
+            self._vault.record_interaction(
+                user_text=user_text,
+                assistant_text=assistant_text,
+                tools_used=tools_used or None,
+            )
+        except Exception as e:
+            print(f"[voice] falha gravando no vault: {e!r}")
 
     def _dispatch_local(self, text: str) -> bool:
         normalized = _normalize_text(text)
@@ -236,6 +279,7 @@ class VoiceCommander:
         ctx = {"persona": self._persona, "honorific": self._persona.honorific}
         try:
             reply = action.handler(tool, params, ctx)
+            self._last_local_tool = f"{tool_name}.{action_name}"
             if reply:
                 self._narrator.speak(reply)
             return True

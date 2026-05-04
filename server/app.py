@@ -56,14 +56,23 @@ class ConversationSendIn(BaseModel):
 
 class MCPServerIn(BaseModel):
     name: str
-    command: str
+    transport: str = "stdio"  # "stdio" | "http" | "sse"
+    command: str = ""
     args: list[str] = []
     env: dict[str, str] = {}
+    url: str = ""
+    headers: dict[str, str] = {}
+    auth: str = "auto"  # "auto" | "oauth" | "none"
     enabled: bool = True
 
 
 class MCPListIn(BaseModel):
     servers: list[MCPServerIn]
+
+
+class MCPImportIn(BaseModel):
+    source: str  # "claude_desktop" | "claude_code" | "claude_code:<path>"
+    name: str
 
 
 class VoiceCommandIn(BaseModel):
@@ -274,9 +283,13 @@ def create_app(
         configs = [
             MCPServerConfig(
                 name=s.name,
+                transport=(s.transport or "stdio").lower(),
                 command=s.command,
                 args=list(s.args),
                 env=dict(s.env),
+                url=s.url,
+                headers=dict(s.headers),
+                auth=(s.auth or "auto").lower(),
                 enabled=s.enabled,
             )
             for s in payload.servers
@@ -291,6 +304,19 @@ def create_app(
             raise HTTPException(status_code=503, detail="MCP manager indisponível")
         statuses = await asyncio.to_thread(mcp_manager.reload)
         return {"ok": True, "statuses": statuses, "servers": mcp_manager.list_status()}
+
+    @app.post("/api/mcps/import")
+    async def import_mcp(payload: MCPImportIn) -> dict:
+        """Copia um server global (Claude Desktop / Code) pra config local."""
+        if mcp_manager is None:
+            raise HTTPException(status_code=503, detail="MCP manager indisponível")
+        try:
+            cfg = await asyncio.to_thread(mcp_manager.import_global, payload.source, payload.name)
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"falha importando: {e!r}")
+        return {"ok": True, "imported": cfg.name, "servers": mcp_manager.list_status()}
 
     # ---------- Conversa / Vault ----------
 
