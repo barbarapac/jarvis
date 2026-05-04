@@ -49,10 +49,15 @@ class Narrator:
         # Serializa speak() entre threads (watcher, code_review, etc.).
         self._lock = threading.Lock()
         self._event_bus = event_bus
+        # Histórico curto da fala atual — quem orquestra um turno (ex.:
+        # VoiceCommander) reseta antes do dispatch e lê depois pra registrar
+        # no vault. Lista porque um turno pode emitir múltiplas falas curtas.
+        self._spoken_buffer: list[str] = []
 
     def speak(self, text: str) -> None:
         """Sintetiza e toca em modo bloqueante. Thread-safe."""
         with self._lock:
+            self._spoken_buffer.append(text)
             if self._event_bus:
                 self._event_bus.publish(EventType.SPEAKING_STARTED, text=text)
             try:
@@ -61,6 +66,17 @@ class Narrator:
             finally:
                 if self._event_bus:
                     self._event_bus.publish(EventType.SPEAKING_ENDED, text=text)
+
+    def reset_spoken_buffer(self) -> None:
+        with self._lock:
+            self._spoken_buffer.clear()
+
+    def drain_spoken_buffer(self) -> str:
+        """Devolve as falas acumuladas concatenadas e zera o buffer."""
+        with self._lock:
+            joined = "\n\n".join(self._spoken_buffer).strip()
+            self._spoken_buffer.clear()
+            return joined
 
     def _play(self, audio_bytes: bytes, fmt: str) -> None:
         suffix = f".{fmt}"

@@ -391,7 +391,60 @@ code {
   color: var(--muted);
   margin-top: 2px;
 }
-.entry .text { line-height: 1.5; word-break: break-word; flex: 1; }
+.entry .text { line-height: 1.55; word-break: break-word; flex: 1; min-width: 0; }
+
+/* Markdown renderizado nas mensagens do Jarvis */
+.entry .text .md-p { margin: 0 0 8px 0; }
+.entry .text .md-p:last-child { margin-bottom: 0; }
+.entry .text .md-h {
+  margin: 12px 0 6px 0;
+  font-size: 13px;
+  letter-spacing: 1.2px;
+  color: var(--text);
+  text-transform: uppercase;
+}
+.entry .text .md-h:first-child { margin-top: 0; }
+.entry .text .md-ul,
+.entry .text .md-ol {
+  margin: 4px 0 8px 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.entry .text .md-ul li::marker { color: var(--reactor); }
+.entry .text .md-ol li::marker { color: var(--gold); }
+.entry .text strong { color: var(--text); font-weight: 700; }
+.entry .text em { color: var(--text); font-style: italic; }
+.entry .text a {
+  color: var(--reactor);
+  text-decoration: underline;
+  text-decoration-color: rgba(0, 212, 255, 0.4);
+  text-underline-offset: 2px;
+}
+.entry .text a:hover { text-decoration-color: var(--reactor); }
+.entry .text .md-code-inline {
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 0.92em;
+  background: rgba(0, 212, 255, 0.08);
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  color: #c8e9ff;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.entry .text .md-pre {
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--reactor);
+  border-radius: 6px;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 12px;
+  overflow-x: auto;
+  line-height: 1.45;
+}
+.entry .text .md-pre code { background: transparent; border: 0; padding: 0; color: var(--text); }
 .entry .url {
   display: block;
   font-size: 11px;
@@ -568,6 +621,122 @@ code {
 .mcp-row.connected   { border-left-color: var(--reactor); }
 .mcp-row.error       { border-left-color: var(--red); }
 .mcp-row.disabled    { border-left-color: var(--muted); opacity: 0.65; }
+.mcp-row.global      { border-left-color: var(--gold, #f5c453); opacity: 0.85; }
+
+.mcp-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 18px 0 6px 0;
+  font-size: 11px;
+  letter-spacing: 1.4px;
+  color: var(--muted);
+  text-transform: uppercase;
+  max-width: 800px;
+}
+.mcp-section-meta { font-size: 10px; opacity: 0.8; }
+
+.mcp-empty-soft {
+  padding: 14px;
+  font-size: 11px;
+  border-style: dotted;
+}
+
+/* ====== Estado de carregamento (linha + painel) ====== */
+
+@keyframes jarvisSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.mcp-row.is-busy {
+  pointer-events: none;
+  opacity: 0.55;
+  position: relative;
+}
+.mcp-row.is-busy::after {
+  content: "";
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 212, 255, 0.25);
+  border-top-color: var(--reactor);
+  animation: jarvisSpin 0.7s linear infinite;
+}
+
+/* Painel ocupado: overlay escurecido (::before) + card central com label
+   pulsante (::after). Não tenta desenhar spinner dentro do card —
+   a animação da borda já comunica "trabalhando". */
+.panel.is-busy {
+  position: relative;
+}
+.panel.is-busy::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 12, 18, 0.55);
+  border-radius: inherit;
+  z-index: 5;
+  pointer-events: all;
+  backdrop-filter: blur(1.5px);
+  -webkit-backdrop-filter: blur(1.5px);
+}
+.panel.is-busy::after {
+  content: attr(data-busy-label);
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 6;
+  background: var(--bg-1);
+  border: 1px solid var(--reactor);
+  border-left: 3px solid var(--reactor);
+  color: var(--text);
+  padding: 14px 22px;
+  border-radius: 8px;
+  font-size: 11px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  box-shadow: 0 0 24px rgba(0, 212, 255, 0.25);
+  animation: jarvisPulseBorder 1.1s ease-in-out infinite alternate;
+  white-space: nowrap;
+  max-width: 80%;
+  text-align: center;
+}
+@keyframes jarvisPulseBorder {
+  from { border-left-color: var(--reactor); box-shadow: 0 0 22px rgba(0, 212, 255, 0.20); }
+  to   { border-left-color: var(--gold);    box-shadow: 0 0 28px rgba(245, 196, 83, 0.32); }
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.mcp-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  vertical-align: middle;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: rgba(255,255,255,0.02);
+}
+.mcp-badge.transport-stdio { color: var(--reactor); border-color: var(--reactor); }
+.mcp-badge.transport-http  { color: #c084fc; border-color: #c084fc; }
+.mcp-badge.transport-sse   { color: #6abf6a; border-color: #6abf6a; }
+.mcp-badge.src-desktop     { color: #00d4ff; border-color: #00d4ff; }
+.mcp-badge.src-code        { color: #f5c453; border-color: #f5c453; }
+.mcp-badge.src-other       { color: var(--muted); }
 
 .mcp-row .mcp-info {
   flex: 1;
@@ -1469,6 +1638,7 @@ code {
   max-width: 1100px;
 }
 .settings-grid .panel { margin: 0; }
+.settings-grid .panel-wide { grid-column: 1 / -1; }
 .settings-actions { max-width: 1100px; }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .legend-dot {

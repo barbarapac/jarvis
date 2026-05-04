@@ -330,67 +330,6 @@
           </div>
         </div>
 
-        <!-- AGENTES / MCPs -->
-        <div class="panel mb-section">
-          <div class="panel-header">
-            <span class="panel-title">Agentes (MCPs)</span>
-            <span class="panel-meta">servidores que o Jarvis pode invocar</span>
-          </div>
-          <div class="mcp-list" id="mcpList"></div>
-          <details class="mb-add">
-            <summary>+ Adicionar servidor</summary>
-            <div class="form-grid">
-              <label>Nome
-                <input type="text" id="mcpName" placeholder="ex: filesystem"/>
-              </label>
-              <label>Comando
-                <input type="text" id="mcpCommand" placeholder="ex: npx"/>
-              </label>
-              <label class="full">Args (um por linha)
-                <textarea id="mcpArgs" rows="3" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;C:\\Users\\barbara.pacheco\\Documents"></textarea>
-              </label>
-              <label class="full">Env (KEY=VALOR, um por linha)
-                <textarea id="mcpEnv" rows="2" placeholder="API_KEY=abc"></textarea>
-              </label>
-            </div>
-            <div class="actions">
-              <button class="btn-primary" id="mcpAdd" type="button">Adicionar</button>
-              <button class="btn-ghost" id="mcpReload" type="button">Recarregar conexões</button>
-            </div>
-          </details>
-        </div>
-
-        <!-- COMANDOS DE VOZ -->
-        <div class="panel mb-section">
-          <div class="panel-header">
-            <span class="panel-title">Comandos de voz</span>
-            <span class="panel-meta">frases custom que disparam ações</span>
-          </div>
-          <div class="cmd-list" id="cmdList"></div>
-          <details class="mb-add">
-            <summary>+ Adicionar comando</summary>
-            <div class="form-grid">
-              <label class="full">Gatilho (frase)
-                <input type="text" id="cmdTrigger" placeholder="ex: modo foco"/>
-              </label>
-              <label class="full">Descrição
-                <input type="text" id="cmdDescription" placeholder="o que esse comando faz"/>
-              </label>
-              <label>Ferramenta
-                <select id="cmdTool"></select>
-              </label>
-              <label>Ação
-                <select id="cmdAction"></select>
-              </label>
-              <div class="full" id="cmdParams"></div>
-            </div>
-            <div class="actions">
-              <button class="btn-primary" id="cmdAdd" type="button">Adicionar</button>
-              <button class="btn-ghost" id="cmdCancel" type="button" style="display:none">Cancelar</button>
-              <span class="save-hint" id="cmdHint"></span>
-            </div>
-          </details>
-        </div>
       </section>
 
       <!-- ========== CONFIGURAÇÕES ========== -->
@@ -406,7 +345,8 @@
         <div class="settings-tabs" role="tablist">
           <button class="settings-tab active" data-stab="general" role="tab" aria-selected="true">Geral</button>
           <button class="settings-tab" data-stab="secrets" role="tab" aria-selected="false">Credenciais</button>
-          <button class="settings-tab" data-stab="voice" role="tab" aria-selected="false">Voz</button>
+          <button class="settings-tab" data-stab="voice" role="tab" aria-selected="false">Voz &amp; Comandos</button>
+          <button class="settings-tab" data-stab="agents" role="tab" aria-selected="false">Agentes (MCPs)</button>
           <button class="settings-tab" data-stab="motor" role="tab" aria-selected="false">Motor</button>
           <button class="settings-tab" data-stab="tools" role="tab" aria-selected="false">Tools</button>
         </div>
@@ -496,6 +436,104 @@
                   Ativar escuta contínua por "Jarvis"
                 </label>
               </div>
+            </div>
+
+            <!-- COMANDOS DE VOZ -->
+            <div class="panel panel-wide">
+              <div class="panel-header">
+                <span class="panel-title">Comandos de voz</span>
+                <span class="panel-meta">frases custom que disparam ações</span>
+              </div>
+              <div class="cmd-list" id="cmdList"></div>
+              <details class="mb-add">
+                <summary>+ Adicionar comando</summary>
+                <div class="form-grid">
+                  <label class="full">Gatilho (frase)
+                    <input type="text" id="cmdTrigger" placeholder="ex: modo foco"/>
+                  </label>
+                  <label class="full">Descrição
+                    <input type="text" id="cmdDescription" placeholder="o que esse comando faz"/>
+                  </label>
+                  <label>Ferramenta
+                    <select id="cmdTool"></select>
+                  </label>
+                  <label>Ação
+                    <select id="cmdAction"></select>
+                  </label>
+                  <div class="full" id="cmdParams"></div>
+                </div>
+                <div class="actions">
+                  <button class="btn-primary" id="cmdAdd" type="button">Adicionar</button>
+                  <button class="btn-ghost" id="cmdCancel" type="button" style="display:none">Cancelar</button>
+                  <span class="save-hint" id="cmdHint"></span>
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== AGENTES (MCPs) ===== -->
+        <div class="settings-pane" data-spane="agents">
+          <div class="settings-grid">
+            <div class="panel panel-wide">
+              <div class="panel-header">
+                <span class="panel-title">Agentes (MCPs)</span>
+                <span class="panel-meta">servidores que o Jarvis pode invocar</span>
+              </div>
+
+              <div class="mcp-section-head">
+                <span>Locais</span>
+                <span class="mcp-section-meta" id="mcpLocalMeta">—</span>
+              </div>
+              <div class="mcp-list" id="mcpList"></div>
+
+              <div class="mcp-section-head">
+                <span>Detectados (Claude Desktop / Claude Code)</span>
+                <span class="mcp-section-meta" id="mcpGlobalMeta">—</span>
+              </div>
+              <div class="mcp-list" id="mcpGlobalList"></div>
+
+              <details class="mb-add">
+                <summary>+ Adicionar servidor</summary>
+                <div class="form-grid">
+                  <label>Nome
+                    <input type="text" id="mcpName" placeholder="ex: filesystem"/>
+                  </label>
+                  <label>Transport
+                    <select id="mcpTransport">
+                      <option value="stdio">stdio (processo local)</option>
+                      <option value="http">http (streamable)</option>
+                      <option value="sse">sse</option>
+                    </select>
+                  </label>
+                  <label class="full mcp-stdio-only">Comando
+                    <input type="text" id="mcpCommand" placeholder="ex: npx"/>
+                  </label>
+                  <label class="full mcp-stdio-only">Args (um por linha)
+                    <textarea id="mcpArgs" rows="3" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;C:\\Users\\barbara.pacheco\\Documents"></textarea>
+                  </label>
+                  <label class="full mcp-stdio-only">Env (KEY=VALOR, um por linha)
+                    <textarea id="mcpEnv" rows="2" placeholder="API_KEY=abc"></textarea>
+                  </label>
+                  <label class="full mcp-http-only" hidden>URL
+                    <input type="text" id="mcpUrl" placeholder="https://learn.microsoft.com/api/mcp"/>
+                  </label>
+                  <label class="mcp-http-only" hidden>Autenticação
+                    <select id="mcpAuth">
+                      <option value="auto">auto (OAuth lazy quando o servidor pedir)</option>
+                      <option value="oauth">oauth (forçar)</option>
+                      <option value="none">nenhuma (público ou via header)</option>
+                    </select>
+                  </label>
+                  <label class="full mcp-http-only" hidden>Headers (KEY=VALOR, um por linha)
+                    <textarea id="mcpHeaders" rows="2" placeholder="Authorization=Bearer abc"></textarea>
+                  </label>
+                </div>
+                <div class="actions">
+                  <button class="btn-primary" id="mcpAdd" type="button">Adicionar</button>
+                  <button class="btn-ghost" id="mcpReload" type="button">Recarregar conexões</button>
+                </div>
+              </details>
             </div>
           </div>
         </div>

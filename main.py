@@ -546,6 +546,7 @@ def main() -> int:
             spotify=spotify, event_bus=event_bus, agent=agent,
             commands=config.get("commands") or [],
             tool_registry=tool_registry_state,
+            vault=vault,
         )
         pending_text_handler.append(commander.handle_text)
         pending_audio_handler.append(commander.handle_audio)

@@ -71,8 +71,12 @@ const cfgHint = document.getElementById("cfgHint");
 const secretsList = document.getElementById("secretsList");
 
 const mcpList = document.getElementById("mcpList");
+const mcpGlobalList = document.getElementById("mcpGlobalList");
+const mcpLocalMeta = document.getElementById("mcpLocalMeta");
+const mcpGlobalMeta = document.getElementById("mcpGlobalMeta");
 const mcpAddBtn = document.getElementById("mcpAdd");
 const mcpReloadBtn = document.getElementById("mcpReload");
+const mcpTransportSel = document.getElementById("mcpTransport");
 
 const cmdList = document.getElementById("cmdList");
 const cmdAddBtn = document.getElementById("cmdAdd");
@@ -107,10 +111,12 @@ document.querySelectorAll(".nav-item").forEach((btn) => {
     const view = btn.dataset.view;
     document.querySelectorAll(".nav-item").forEach((n) => n.classList.toggle("active", n === btn));
     document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.dataset.view === view));
-    if (view === "settings") loadConfig();
-    if (view === "megabrain") {
+    if (view === "settings") {
+      loadConfig();
       loadMcps();
       loadCommands();
+    }
+    if (view === "megabrain") {
       refreshBrainGraph();
       refreshBrainMetrics();
     }
@@ -169,7 +175,17 @@ function addEntry({ kind, badge, text, url }) {
   badgeSpan.textContent = badge;
   const textSpan = document.createElement("span");
   textSpan.className = "text";
-  textSpan.textContent = text;
+
+  // Mensagens do Jarvis vêm de um LLM e podem trazer markdown (parágrafos,
+  // listas, **negrito**, `código`). Renderizamos com um parser próprio
+  // pra não trazer dependência externa. Demais entries (user, tool log,
+  // erros) ficam como texto puro pra evitar surpresa de injeção.
+  if (kind === "jarvis") {
+    textSpan.innerHTML = renderMarkdownLite(text || "");
+  } else {
+    textSpan.textContent = text || "";
+  }
+
   if (url) {
     const a = document.createElement("a");
     a.href = url;
@@ -186,6 +202,74 @@ function addEntry({ kind, badge, text, url }) {
     transcript.removeChild(transcript.firstChild);
   }
   transcript.scrollTop = transcript.scrollHeight;
+}
+
+// Markdown leve: cobre o que o Claude tipicamente devolve. Escapa o texto
+// ANTES de aplicar regexes de inline pra não permitir injeção de HTML
+// arbitrário (ex: <script>) — só geramos as tags que controlamos.
+function renderMarkdownLite(src) {
+  if (!src) return "";
+
+  // 1) Code blocks ``` ... ``` — extrai e substitui por placeholders pra
+  //    que o resto dos regexes não estraguem o conteúdo do bloco.
+  const blocks = [];
+  src = String(src).replace(/```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g, (_m, lang, code) => {
+    const idx = blocks.length;
+    blocks.push({ lang: lang || "", code });
+    return ` CODEBLOCK${idx} `;
+  });
+
+  // 2) Escape do texto inteiro.
+  src = escapeHtml(src);
+
+  // 3) Inline code `…` — reaproveita placeholders pra não conflitar com **/*.
+  const inlines = [];
+  src = src.replace(/`([^`\n]+)`/g, (_m, code) => {
+    const idx = inlines.length;
+    inlines.push(code);
+    return ` INLINE${idx} `;
+  });
+
+  // 4) Inline: bold, italic, links.
+  src = src
+    .replace(/\*\*([^*\n]+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g, "$1<em>$2</em>")
+    .replace(/\[([^\]]+)\]\(((?:https?:|mailto:)[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+  // 5) Quebra em blocos por linha em branco; processa listas e cabeçalhos.
+  const blocksHtml = src.split(/\n{2,}/).map((block) => {
+    const lines = block.split("\n");
+    // Heading (# / ## / ###).
+    const heading = lines[0].match(/^(#{1,3})\s+(.+)$/);
+    if (heading && lines.length === 1) {
+      const level = heading[1].length;
+      return `<h${level + 2} class="md-h">${heading[2]}</h${level + 2}>`;
+    }
+    // Lista não ordenada.
+    if (lines.every((l) => /^\s*[-*+]\s+/.test(l))) {
+      const items = lines.map((l) => `<li>${l.replace(/^\s*[-*+]\s+/, "")}</li>`).join("");
+      return `<ul class="md-ul">${items}</ul>`;
+    }
+    // Lista ordenada.
+    if (lines.every((l) => /^\s*\d+\.\s+/.test(l))) {
+      const items = lines.map((l) => `<li>${l.replace(/^\s*\d+\.\s+/, "")}</li>`).join("");
+      return `<ol class="md-ol">${items}</ol>`;
+    }
+    // Parágrafo: preserva quebras simples.
+    return `<p class="md-p">${lines.join("<br>")}</p>`;
+  }).join("");
+
+  // 6) Re-injetar inline code e code blocks.
+  let html = blocksHtml.replace(/ INLINE(\d+) /g, (_m, i) => {
+    return `<code class="md-code-inline">${escapeHtml(inlines[Number(i)])}</code>`;
+  });
+  html = html.replace(/ CODEBLOCK(\d+) /g, (_m, i) => {
+    const b = blocks[Number(i)];
+    const langClass = b.lang ? ` data-lang="${escapeHtml(b.lang)}"` : "";
+    return `<pre class="md-pre"${langClass}><code>${escapeHtml(b.code)}</code></pre>`;
+  });
+
+  return html;
 }
 
 // ============================================================
@@ -309,14 +393,14 @@ async function refreshBrainMetrics() {
     }
   } catch (_) { /* silencia — métricas são best-effort */ }
 
-  // MCPs conectados — chama /api/mcps e conta status === "connected"
+  // MCPs conectados — só conta locais (globais detectados ainda não estão ativos).
   try {
     const r = await fetch("/api/mcps");
     if (r.ok) {
       const data = await r.json();
-      const servers = data.servers || [];
-      const connected = servers.filter((s) => s.status === "connected").length;
-      if (mbMcps) mbMcps.textContent = `${connected}/${servers.length}`;
+      const locals = (data.servers || []).filter((s) => (s.source || "local") === "local");
+      const connected = locals.filter((s) => s.connected).length;
+      if (mbMcps) mbMcps.textContent = `${connected}/${locals.length}`;
     }
   } catch (_) { /* idem */ }
 }
@@ -1200,115 +1284,342 @@ cfgReloadBtn.addEventListener("click", () => loadConfig());
 //                          MCPs
 // ============================================================
 
+// Cache da última lista de servers — evita race entre toggle e re-fetch.
+let mcpServersCache = [];
+
+// Container do painel pra aplicar overlay de "carregando" em ações que
+// afetam todos os servers (reload, import com reconexão).
+function getMcpPanel() {
+  return mcpList?.closest(".panel") || null;
+}
+
+function setMcpPanelBusy(busy, label) {
+  const panel = getMcpPanel();
+  if (!panel) return;
+  panel.classList.toggle("is-busy", !!busy);
+  if (busy) {
+    panel.dataset.busyLabel = label || "Aguardando…";
+  } else {
+    delete panel.dataset.busyLabel;
+  }
+}
+
+function setRowBusy(rowEl, busy) {
+  if (!rowEl) return;
+  rowEl.classList.toggle("is-busy", !!busy);
+  rowEl.querySelectorAll("button").forEach((b) => { b.disabled = !!busy; });
+}
+
+function findMcpRow(name) {
+  // Busca pela linha que contém um botão com data-name correspondente.
+  const sel = `button[data-name="${CSS.escape(name)}"]`;
+  const btn = (mcpList.querySelector(sel) || mcpGlobalList.querySelector(sel));
+  return btn ? btn.closest(".mcp-row") : null;
+}
+
 async function loadMcps() {
+  setMcpPanelBusy(true, "Carregando…");
   try {
     const r = await fetch("/api/mcps");
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
-    renderMcps(data.servers || []);
+    mcpServersCache = data.servers || [];
+    renderMcps(mcpServersCache);
   } catch (e) {
     mcpList.innerHTML = `<div class="mcp-empty">Falha lendo MCPs: ${e.message}</div>`;
+    if (mcpGlobalList) mcpGlobalList.innerHTML = "";
+  } finally {
+    setMcpPanelBusy(false);
   }
 }
 
 function renderMcps(servers) {
+  const locals = servers.filter((s) => (s.source || "local") === "local");
+  const globals = servers.filter((s) => (s.source || "local") !== "local");
+
+  mcpLocalMeta.textContent = locals.length
+    ? `${locals.filter((s) => s.connected).length}/${locals.length} conectados`
+    : "vazio";
+  mcpGlobalMeta.textContent = globals.length
+    ? `${globals.length} detectado(s)`
+    : "nenhum";
+
   mcpList.innerHTML = "";
-  if (!servers.length) {
-    mcpList.innerHTML = `<div class="mcp-empty">Nenhum servidor MCP registrado. Adicione abaixo.</div>`;
-    return;
+  if (!locals.length) {
+    mcpList.innerHTML = `<div class="mcp-empty">Nenhum servidor local. Adicione abaixo, ou importe um detectado.</div>`;
+  } else {
+    for (const s of locals) mcpList.appendChild(buildMcpRow(s));
   }
-  for (const s of servers) {
-    const row = document.createElement("div");
-    let cls = "mcp-row";
-    if (!s.enabled) cls += " disabled";
-    else if (s.connected) cls += " connected";
-    else cls += " error";
-    row.className = cls;
 
-    const cmdLine = `${s.command} ${(s.args || []).join(" ")}`.trim();
-    const toolsText = s.error
-      ? `erro: ${s.error}`
-      : (s.tools && s.tools.length ? `${s.tools.length} tool(s): ${s.tools.join(", ")}` : "sem tools");
+  mcpGlobalList.innerHTML = "";
+  if (!globals.length) {
+    mcpGlobalList.innerHTML = `<div class="mcp-empty mcp-empty-soft">Nenhum MCP global encontrado em ~/.claude.json ou Claude Desktop.</div>`;
+  } else {
+    for (const s of globals) mcpGlobalList.appendChild(buildMcpRow(s));
+  }
 
-    row.innerHTML = `
-      <div class="mcp-info">
-        <div class="mcp-name">${escapeHtml(s.name)}</div>
-        <div class="mcp-cmd">${escapeHtml(cmdLine)}</div>
-        <div class="mcp-tools ${s.error ? "error" : ""}">${escapeHtml(toolsText)}</div>
-      </div>
-      <div class="mcp-actions">
+  mcpList.querySelectorAll("button[data-action]").forEach((btn) => {
+    btn.addEventListener("click", () => mcpAction(btn.dataset.action, btn.dataset.name, btn.dataset.source || "local"));
+  });
+  mcpGlobalList.querySelectorAll("button[data-action]").forEach((btn) => {
+    btn.addEventListener("click", () => mcpAction(btn.dataset.action, btn.dataset.name, btn.dataset.source || "local"));
+  });
+}
+
+function buildMcpRow(s) {
+  const row = document.createElement("div");
+  const isGlobal = (s.source || "local") !== "local";
+  let cls = "mcp-row";
+  if (isGlobal) cls += " global";
+  else if (!s.enabled) cls += " disabled";
+  else if (s.connected) cls += " connected";
+  else cls += " error";
+  row.className = cls;
+
+  const transport = s.transport || "stdio";
+  const target = transport === "stdio"
+    ? `${s.command || ""} ${(s.args || []).join(" ")}`.trim()
+    : (s.url || "");
+  const sourceLabel = sourceBadge(s.source || "local");
+  const transportBadge = `<span class="mcp-badge transport-${escapeHtml(transport)}">${escapeHtml(transport)}</span>`;
+
+  let toolsText;
+  if (isGlobal) {
+    toolsText = "não conectado (use Importar pra ativar no Jarvis)";
+  } else if (s.error) {
+    toolsText = `erro: ${s.error}`;
+  } else if (!s.enabled) {
+    toolsText = "desligado";
+  } else if (s.tools && s.tools.length) {
+    toolsText = `${s.tools.length} tool(s): ${s.tools.join(", ")}`;
+  } else {
+    toolsText = "sem tools";
+  }
+
+  const actions = isGlobal
+    ? `<button class="icon-btn" data-action="import" data-name="${escapeHtml(s.name)}" data-source="${escapeHtml(s.source)}">Importar</button>`
+    : `
         <button class="icon-btn" data-action="toggle" data-name="${escapeHtml(s.name)}">${s.enabled ? "Desligar" : "Ligar"}</button>
         <button class="icon-btn danger" data-action="remove" data-name="${escapeHtml(s.name)}">Remover</button>
+      `;
+
+  row.innerHTML = `
+    <div class="mcp-info">
+      <div class="mcp-name">
+        ${escapeHtml(s.name)}
+        ${transportBadge}
+        ${sourceLabel}
       </div>
-    `;
-    mcpList.appendChild(row);
-  }
-  mcpList.querySelectorAll("button[data-action]").forEach((btn) => {
-    btn.addEventListener("click", () => mcpAction(btn.dataset.action, btn.dataset.name));
-  });
+      <div class="mcp-cmd">${escapeHtml(target || "(sem alvo)")}</div>
+      <div class="mcp-tools ${s.error ? "error" : ""}">${escapeHtml(toolsText)}</div>
+    </div>
+    <div class="mcp-actions">${actions}</div>
+  `;
+  return row;
 }
 
-async function mcpAction(action, name) {
-  // Lê a lista atual, modifica, faz PUT.
-  const r = await fetch("/api/mcps");
-  const data = await r.json();
-  let servers = (data.servers || []).map((s) => ({
-    name: s.name, command: s.command, args: s.args, env: {}, enabled: s.enabled,
-  }));
-  if (action === "remove") {
-    servers = servers.filter((s) => s.name !== name);
-  } else if (action === "toggle") {
-    servers = servers.map((s) => s.name === name ? { ...s, enabled: !s.enabled } : s);
+function sourceBadge(source) {
+  if (source === "local") return "";
+  let label, cls;
+  if (source === "claude_desktop") {
+    label = "Claude Desktop";
+    cls = "src-desktop";
+  } else if (source === "claude_code") {
+    label = "Claude Code (global)";
+    cls = "src-code";
+  } else if (source.startsWith("claude_code:")) {
+    const proj = source.slice("claude_code:".length).split(/[\\/]/).pop() || "?";
+    label = `Claude Code · ${proj}`;
+    cls = "src-code";
+  } else {
+    label = source;
+    cls = "src-other";
   }
-  await fetch("/api/mcps", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ servers }),
-  });
-  loadMcps();
+  return `<span class="mcp-badge ${cls}" title="${escapeHtml(source)}">${escapeHtml(label)}</span>`;
 }
+
+async function mcpAction(action, name, source) {
+  const row = findMcpRow(name);
+  setRowBusy(row, true);
+
+  // Labels diferentes por ação — o overlay do painel descreve o que tá rolando.
+  const panelLabels = {
+    import: `Importando ${name} e reconectando…`,
+    remove: `Removendo ${name} e reconectando…`,
+    toggle: `Atualizando ${name} e reconectando…`,
+  };
+  setMcpPanelBusy(true, panelLabels[action] || "Aguardando…");
+
+  try {
+    if (action === "import") {
+      const r = await fetch("/api/mcps/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, source }),
+      });
+      if (!r.ok) {
+        const err = await r.text();
+        showToast(`Falha importando ${name}: ${err}`, "error");
+      } else {
+        showToast(`${name} importado.`);
+      }
+    } else {
+      // Toggle/remove só agem em locais.
+      let servers = mcpServersCache
+        .filter((s) => (s.source || "local") === "local")
+        .map((s) => ({
+          name: s.name,
+          transport: s.transport || "stdio",
+          command: s.command || "",
+          args: s.args || [],
+          env: {},
+          url: s.url || "",
+          headers: {},
+          auth: s.auth || "auto",
+          enabled: s.enabled,
+        }));
+      if (action === "remove") {
+        servers = servers.filter((s) => s.name !== name);
+      } else if (action === "toggle") {
+        servers = servers.map((s) => s.name === name ? { ...s, enabled: !s.enabled } : s);
+      }
+      const r = await fetch("/api/mcps", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ servers }),
+      });
+      if (!r.ok) {
+        const err = await r.text();
+        showToast(`Falha em ${action} ${name}: ${err}`, "error");
+      } else if (action === "remove") {
+        showToast(`${name} removido.`);
+      } else if (action === "toggle") {
+        const wasEnabled = mcpServersCache.find((s) => s.name === name)?.enabled;
+        showToast(`${name} ${wasEnabled ? "desligado" : "ligado"}.`);
+      }
+    }
+    await loadMcps();
+  } catch (e) {
+    showToast(`Erro: ${e.message}`, "error");
+  } finally {
+    setMcpPanelBusy(false);
+    // O loadMcps re-renderiza tudo, então a row antiga é substituída — mas
+    // se algo falhou antes do re-render, garanto liberar.
+    setRowBusy(row, false);
+  }
+}
+
+function mcpToggleTransportFields() {
+  const t = mcpTransportSel.value;
+  const isStdio = t === "stdio";
+  document.querySelectorAll(".mcp-stdio-only").forEach((el) => { el.hidden = !isStdio; });
+  document.querySelectorAll(".mcp-http-only").forEach((el) => { el.hidden = isStdio; });
+}
+mcpTransportSel.addEventListener("change", mcpToggleTransportFields);
+mcpToggleTransportFields();
 
 mcpAddBtn.addEventListener("click", async () => {
   const name = document.getElementById("mcpName").value.trim();
+  const transport = mcpTransportSel.value;
   const command = document.getElementById("mcpCommand").value.trim();
   const argsRaw = document.getElementById("mcpArgs").value.trim();
   const envRaw = document.getElementById("mcpEnv").value.trim();
-  if (!name || !command) {
-    alert("Nome e comando são obrigatórios.");
-    return;
-  }
+  const url = document.getElementById("mcpUrl").value.trim();
+  const headersRaw = document.getElementById("mcpHeaders").value.trim();
+  const auth = (document.getElementById("mcpAuth")?.value || "auto");
+
+  if (!name) { alert("Nome é obrigatório."); return; }
+  if (transport === "stdio" && !command) { alert("Para stdio, comando é obrigatório."); return; }
+  if (transport !== "stdio" && !url) { alert("Para http/sse, URL é obrigatória."); return; }
+
   const args = argsRaw ? argsRaw.split("\n").map((s) => s.trim()).filter(Boolean) : [];
-  const env = {};
-  if (envRaw) {
-    for (const line of envRaw.split("\n")) {
-      const idx = line.indexOf("=");
-      if (idx > 0) env[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+  const env = parseKv(envRaw);
+  const headers = parseKv(headersRaw);
+
+  const existing = mcpServersCache
+    .filter((s) => (s.source || "local") === "local")
+    .map((s) => ({
+      name: s.name,
+      transport: s.transport || "stdio",
+      command: s.command || "",
+      args: s.args || [],
+      env: {},
+      url: s.url || "",
+      headers: {},
+      auth: s.auth || "auto",
+      enabled: s.enabled,
+    }));
+  const merged = [
+    ...existing.filter((s) => s.name !== name),
+    { name, transport, command, args, env, url, headers, auth, enabled: true },
+  ];
+
+  const isUpdate = mcpServersCache.some((s) => s.name === name && (s.source || "local") === "local");
+  setMcpPanelBusy(true, `${isUpdate ? "Atualizando" : "Adicionando"} ${name} e reconectando…`);
+  mcpAddBtn.disabled = true;
+  const originalLabel = mcpAddBtn.textContent;
+  mcpAddBtn.textContent = isUpdate ? "Atualizando…" : "Adicionando…";
+
+  try {
+    const r = await fetch("/api/mcps", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servers: merged }),
+    });
+    if (!r.ok) {
+      const err = await r.text();
+      showToast(`Falha salvando ${name}: ${err}`, "error");
+      return;
     }
+
+    document.getElementById("mcpName").value = "";
+    document.getElementById("mcpCommand").value = "";
+    document.getElementById("mcpArgs").value = "";
+    document.getElementById("mcpEnv").value = "";
+    document.getElementById("mcpUrl").value = "";
+    document.getElementById("mcpHeaders").value = "";
+    showToast(`${name} ${isUpdate ? "atualizado" : "adicionado"}.`);
+    await loadMcps();
+  } catch (e) {
+    showToast(`Erro: ${e.message}`, "error");
+  } finally {
+    setMcpPanelBusy(false);
+    mcpAddBtn.disabled = false;
+    mcpAddBtn.textContent = originalLabel;
   }
-
-  const r = await fetch("/api/mcps");
-  const data = await r.json();
-  const existing = (data.servers || []).map((s) => ({
-    name: s.name, command: s.command, args: s.args, env: {}, enabled: s.enabled,
-  }));
-  const merged = [...existing.filter((s) => s.name !== name), { name, command, args, env, enabled: true }];
-
-  await fetch("/api/mcps", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ servers: merged }),
-  });
-
-  document.getElementById("mcpName").value = "";
-  document.getElementById("mcpCommand").value = "";
-  document.getElementById("mcpArgs").value = "";
-  document.getElementById("mcpEnv").value = "";
-  loadMcps();
 });
 
+function parseKv(raw) {
+  const out = {};
+  if (!raw) return out;
+  for (const line of raw.split("\n")) {
+    const idx = line.indexOf("=");
+    if (idx > 0) out[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+  }
+  return out;
+}
+
 mcpReloadBtn.addEventListener("click", async () => {
-  await fetch("/api/mcps/reload", { method: "POST" });
-  loadMcps();
+  setMcpPanelBusy(true, "Reconectando todos os servidores…");
+  mcpReloadBtn.disabled = true;
+  const originalLabel = mcpReloadBtn.textContent;
+  mcpReloadBtn.textContent = "Reconectando…";
+  try {
+    const r = await fetch("/api/mcps/reload", { method: "POST" });
+    if (!r.ok) {
+      const err = await r.text();
+      showToast(`Falha recarregando: ${err}`, "error");
+    } else {
+      showToast("Servidores reconectados.");
+    }
+    await loadMcps();
+  } catch (e) {
+    showToast(`Erro: ${e.message}`, "error");
+  } finally {
+    setMcpPanelBusy(false);
+    mcpReloadBtn.disabled = false;
+    mcpReloadBtn.textContent = originalLabel;
+  }
 });
 
 // ============================================================
