@@ -95,6 +95,7 @@ const STATUS_LABELS = {
   idle: "online",
   listening: "ouvindo...",
   speaking: "falando...",
+  thinking: "pensando...",
   working: "executando...",
 };
 
@@ -115,10 +116,18 @@ document.querySelectorAll(".nav-item").forEach((btn) => {
       loadConfig();
       loadMcps();
       loadCommands();
+      loadSkills();
+      loadClaudeProjects();
+      loadTerminalPref();
     }
     if (view === "megabrain") {
       refreshBrainGraph();
       refreshBrainMetrics();
+    }
+    if (view === "home") {
+      // Recarrega skills ao voltar pra home pra refletir toggles feitos
+      // em outra aba. É uma chamada barata.
+      loadSkills();
     }
   });
 });
@@ -144,7 +153,7 @@ document.querySelectorAll(".settings-tab").forEach((btn) => {
 
 function setStatus(state) {
   brandStatus.textContent = STATUS_LABELS[state] || state;
-  bigReactor.classList.remove("listening", "speaking", "working");
+  bigReactor.classList.remove("listening", "speaking", "thinking", "working");
   if (state && state !== "idle") bigReactor.classList.add(state);
 }
 
@@ -330,13 +339,16 @@ function handleEvent(evt) {
       });
       break;
     case "agent_turn_started":
-      // O reator já entra em "working" e o user_text é registrado pelo
-      // user_text_input/user_voice_transcribed; sem duplicar entrada aqui.
+      setStatus("thinking");
+      setLastLine("Pensando...");
       break;
     case "agent_thinking":
-      // Estado pulsante do reator já reflete "pensando"; sem ruído no histórico.
+      setStatus("thinking");
+      setLastLine(data.label || "Pensando...");
       break;
     case "agent_tool_call":
+      setStatus("thinking");
+      setLastLine(`Consultando ${data.tool || "ferramenta"}...`);
       addEntry({ kind: "system", badge: "TOOL", text: `${data.tool || ""}${data.args_preview ? ` — ${data.args_preview}` : ""}` });
       break;
     case "agent_tool_result":
@@ -344,9 +356,16 @@ function handleEvent(evt) {
       break;
     case "agent_turn_ended":
       if (data.assistant_text) addEntry({ kind: "jarvis", badge: "JARVIS", text: data.assistant_text });
+      // Se nada vai ser falado (turno vazio), volta o reator ao idle —
+      // senão o speaking_started/ended cuida da transição.
+      if (!data.assistant_text) setStatus("idle");
       break;
     case "jarvis_initiative":
       if (data.text) addEntry({ kind: "jarvis", badge: (data.label || "INICIATIVA").toUpperCase(), text: data.text });
+      break;
+    case "skills_updated":
+      // Outra aba/cliente toggou uma skill — recarrega aqui pra manter sync.
+      loadSkills();
       break;
     case "log":
       addEntry({ kind: "system", badge: "LOG", text: data.text || "" });
@@ -1626,6 +1645,343 @@ mcpReloadBtn.addEventListener("click", async () => {
 //                       Comandos
 // ============================================================
 
+// ============================================================
+//                       Skills (awareness)
+// ============================================================
+
+const homeSkillsChips = document.getElementById("homeSkillsChips");
+const homeSkillsMeta = document.getElementById("homeSkillsMeta");
+const skillsListEl = document.getElementById("skillsList");
+const skillsPaneMeta = document.getElementById("skillsPaneMeta");
+const skillsSearchEl = document.getElementById("skillsSearch");
+const manageSkillsBtn = document.getElementById("manageSkillsBtn");
+const skillsReloadBtn = document.getElementById("skillsReloadBtn");
+
+let skillsState = { skills: [], total: 0, enabled_count: 0 };
+
+async function loadSkills() {
+  try {
+    const r = await fetch("/api/skills");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    skillsState = await r.json();
+  } catch (e) {
+    console.error("falha lendo skills", e);
+    skillsState = { skills: [], total: 0, enabled_count: 0 };
+  }
+  renderHomeSkills();
+  renderSkillsPane();
+}
+
+function renderHomeSkills() {
+  if (!homeSkillsChips) return;
+  const enabled = skillsState.skills.filter((s) => s.enabled);
+  homeSkillsMeta.textContent = `${skillsState.enabled_count} ativas / ${skillsState.total}`;
+  if (!enabled.length) {
+    homeSkillsChips.innerHTML = `<div class="skill-chips-empty">Nenhuma skill ativa. Ative em Configurações.</div>`;
+    return;
+  }
+  homeSkillsChips.innerHTML = "";
+  for (const s of enabled) {
+    const chip = document.createElement("span");
+    chip.className = `skill-chip skill-chip-${chipSourceClass(s.source)}`;
+    chip.textContent = s.name;
+    if (s.description) chip.title = s.description;
+    homeSkillsChips.appendChild(chip);
+  }
+}
+
+function renderSkillsPane() {
+  if (!skillsListEl) return;
+  const query = (skillsSearchEl?.value || "").trim().toLowerCase();
+  if (skillsPaneMeta) {
+    skillsPaneMeta.textContent = `${skillsState.enabled_count} ativas / ${skillsState.total}`;
+  }
+  if (!skillsState.skills.length) {
+    skillsListEl.innerHTML = `<div class="mcp-empty">Nenhuma skill encontrada. Garanta que <code>~/.claude</code> existe.</div>`;
+    return;
+  }
+  // Agrupa por fonte: user-skill, user-command, plugin:*
+  const groups = new Map();
+  for (const s of skillsState.skills) {
+    if (query && !s.name.toLowerCase().includes(query) && !(s.description || "").toLowerCase().includes(query)) {
+      continue;
+    }
+    const label = sourceLabel(s.source);
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(s);
+  }
+  if (!groups.size) {
+    skillsListEl.innerHTML = `<div class="mcp-empty">Nenhuma skill bate com "${escapeHtml(query)}".</div>`;
+    return;
+  }
+  skillsListEl.innerHTML = "";
+  for (const [label, items] of groups) {
+    const head = document.createElement("div");
+    head.className = "mcp-section-head";
+    head.innerHTML = `<span>${escapeHtml(label)}</span><span class="mcp-section-meta">${items.length}</span>`;
+    skillsListEl.appendChild(head);
+    for (const s of items) {
+      skillsListEl.appendChild(renderSkillRow(s));
+    }
+  }
+}
+
+function renderSkillRow(skill) {
+  const row = document.createElement("div");
+  row.className = `skill-row skill-row-${chipSourceClass(skill.source)}${skill.enabled ? "" : " disabled"}`;
+
+  const main = document.createElement("div");
+  main.className = "skill-row-main";
+  const name = document.createElement("div");
+  name.className = "skill-row-name";
+  name.textContent = skill.name;
+  const desc = document.createElement("div");
+  desc.className = "skill-row-desc";
+  desc.textContent = skill.description || "(sem descrição)";
+  main.appendChild(name);
+  main.appendChild(desc);
+
+  const toggle = document.createElement("label");
+  toggle.className = "skill-toggle";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.checked = !!skill.enabled;
+  cb.addEventListener("change", () => toggleSkill(skill.name, cb.checked, cb));
+  const slider = document.createElement("span");
+  slider.className = "skill-toggle-slider";
+  toggle.appendChild(cb);
+  toggle.appendChild(slider);
+
+  row.appendChild(main);
+  row.appendChild(toggle);
+  return row;
+}
+
+async function toggleSkill(name, enabled, checkbox) {
+  if (checkbox) checkbox.disabled = true;
+  try {
+    const r = await fetch("/api/skills/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, enabled }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    // Otimista: atualiza estado local + redesenha sem refetch (rápido).
+    const target = skillsState.skills.find((s) => s.name === name);
+    if (target) target.enabled = enabled;
+    skillsState.enabled_count = skillsState.skills.filter((s) => s.enabled).length;
+    renderHomeSkills();
+    renderSkillsPane();
+  } catch (e) {
+    console.error("toggle falhou", e);
+    if (checkbox) checkbox.checked = !enabled; // reverte
+    showToast(`Falha ao alternar ${name}: ${e.message}`);
+  } finally {
+    if (checkbox) checkbox.disabled = false;
+  }
+}
+
+function chipSourceClass(source) {
+  if (!source) return "other";
+  if (source.startsWith("plugin")) return "plugin";
+  if (source === "user-command") return "command";
+  if (source === "user-skill") return "skill";
+  return "other";
+}
+
+function sourceLabel(source) {
+  if (!source) return "Outras";
+  if (source === "user-skill") return "Skills pessoais";
+  if (source === "user-command") return "Slash commands";
+  if (source.startsWith("plugin:")) return `Plugin · ${source.slice(7)}`;
+  return source;
+}
+
+if (skillsSearchEl) {
+  skillsSearchEl.addEventListener("input", () => renderSkillsPane());
+}
+if (skillsReloadBtn) {
+  skillsReloadBtn.addEventListener("click", () => loadSkills());
+}
+if (manageSkillsBtn) {
+  manageSkillsBtn.addEventListener("click", () => {
+    // Vai pra aba Configurações > Skills.
+    document.querySelector('.nav-item[data-view="settings"]')?.click();
+    document.querySelector('.settings-tab[data-stab="skills"]')?.click();
+  });
+}
+
+// ============================================================
+//                Projetos do Claude Code (CLI)
+// ============================================================
+
+const ccProjectsListEl = document.getElementById("ccProjectsList");
+const ccProjectsMetaEl = document.getElementById("ccProjectsMeta");
+const ccProjNameEl = document.getElementById("ccProjName");
+const ccProjPathEl = document.getElementById("ccProjPath");
+const ccProjAddBtn = document.getElementById("ccProjAdd");
+
+let claudeProjectsState = [];
+
+async function loadClaudeProjects() {
+  if (!ccProjectsListEl) return;
+  try {
+    const r = await fetch("/api/claude-code/projects");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    claudeProjectsState = data.projects || [];
+  } catch (e) {
+    console.error("falha lendo claude projects", e);
+    claudeProjectsState = [];
+  }
+  renderClaudeProjects();
+}
+
+function renderClaudeProjects() {
+  if (!ccProjectsListEl) return;
+  if (ccProjectsMetaEl) {
+    ccProjectsMetaEl.textContent = `${claudeProjectsState.length} cadastrado(s)`;
+  }
+  if (!claudeProjectsState.length) {
+    ccProjectsListEl.innerHTML = `<div class="cc-projects-empty">Nenhum projeto cadastrado. Adicione abaixo pra o Jarvis poder abrir o Claude Code.</div>`;
+    return;
+  }
+  ccProjectsListEl.innerHTML = "";
+  for (const p of claudeProjectsState) {
+    const row = document.createElement("div");
+    row.className = `cc-project-row${p.exists ? "" : " missing"}`;
+
+    const info = document.createElement("div");
+    info.className = "cc-project-info";
+    const nameEl = document.createElement("span");
+    nameEl.className = "cc-project-name";
+    nameEl.textContent = p.name;
+    const pathEl = document.createElement("span");
+    pathEl.className = "cc-project-path";
+    pathEl.textContent = p.path;
+    info.appendChild(nameEl);
+    info.appendChild(pathEl);
+    row.appendChild(info);
+
+    const status = document.createElement("span");
+    status.className = `cc-project-status ${p.exists ? "ok" : "missing"}`;
+    status.textContent = p.exists ? "✓ existe" : "diretório não existe";
+    row.appendChild(status);
+
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "btn-ghost";
+    removeBtn.type = "button";
+    removeBtn.textContent = "Remover";
+    removeBtn.addEventListener("click", () => removeClaudeProject(p.name));
+    row.appendChild(removeBtn);
+
+    ccProjectsListEl.appendChild(row);
+  }
+}
+
+async function saveClaudeProjects(projectsMap) {
+  const r = await fetch("/api/claude-code/projects", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ projects: projectsMap }),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  await loadClaudeProjects();
+}
+
+async function addClaudeProject() {
+  const name = (ccProjNameEl?.value || "").trim();
+  const path = (ccProjPathEl?.value || "").trim();
+  if (!name || !path) {
+    alert("Preencha apelido e caminho.");
+    return;
+  }
+  if (claudeProjectsState.some((p) => p.name === name)) {
+    if (!confirm(`Já existe um projeto chamado ${name}. Sobrescrever?`)) return;
+  }
+  const next = {};
+  for (const p of claudeProjectsState) next[p.name] = p.path;
+  next[name] = path;
+  try {
+    await saveClaudeProjects(next);
+    if (ccProjNameEl) ccProjNameEl.value = "";
+    if (ccProjPathEl) ccProjPathEl.value = "";
+  } catch (e) {
+    alert(`Falha salvando: ${e.message}`);
+  }
+}
+
+async function removeClaudeProject(name) {
+  if (!confirm(`Remover projeto ${name}?`)) return;
+  const next = {};
+  for (const p of claudeProjectsState) {
+    if (p.name !== name) next[p.name] = p.path;
+  }
+  try {
+    await saveClaudeProjects(next);
+  } catch (e) {
+    alert(`Falha removendo: ${e.message}`);
+  }
+}
+
+if (ccProjAddBtn) {
+  ccProjAddBtn.addEventListener("click", addClaudeProject);
+}
+[ccProjNameEl, ccProjPathEl].forEach((el) => {
+  if (!el) return;
+  el.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") addClaudeProject();
+  });
+});
+
+// ============================================================
+//                  Terminal preferido (Geral)
+// ============================================================
+
+const terminalSelectEl = document.getElementById("terminalSelect");
+const terminalMetaEl = document.getElementById("terminalMeta");
+
+async function loadTerminalPref() {
+  if (!terminalSelectEl) return;
+  try {
+    const r = await fetch("/api/terminal");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    const pref = data.preferred || "auto";
+    terminalSelectEl.value = pref;
+    if (terminalMetaEl) terminalMetaEl.textContent = pref;
+  } catch (e) {
+    console.error("falha lendo terminal pref", e);
+    if (terminalMetaEl) terminalMetaEl.textContent = "erro";
+  }
+}
+
+async function saveTerminalPref(pref) {
+  const r = await fetch("/api/terminal", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ preferred: pref }),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  if (terminalMetaEl) terminalMetaEl.textContent = pref;
+}
+
+if (terminalSelectEl) {
+  terminalSelectEl.addEventListener("change", async (e) => {
+    const pref = e.target.value;
+    try {
+      await saveTerminalPref(pref);
+    } catch (err) {
+      alert(`Falha salvando preferência de terminal: ${err.message}`);
+      await loadTerminalPref();
+    }
+  });
+}
+
+// ============================================================
+//                       Comandos de voz
+// ============================================================
+
 let commandsCatalog = [];
 let commandsList = [];
 let editingCommandIndex = null;
@@ -2101,6 +2457,7 @@ function bootHomeCockpit() {
   setInterval(refreshHomeSystems, 30000);
   refreshHomeVault();
   refreshBrainGraph();
+  loadSkills();
 }
 
 // ============================================================

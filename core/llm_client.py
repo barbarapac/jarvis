@@ -161,7 +161,7 @@ class AnthropicClient:
         max_tokens: int = 1024,
         temperature: float = 0.2,
     ) -> LLMResponse:
-        anthropic_messages = [_to_anthropic_message(m) for m in messages]
+        anthropic_messages = _to_anthropic_messages(messages)
 
         # System em formato de blocks com cache_control no último bloco. A
         # Anthropic cacheia a partir do ponto marcado, então passar uma única
@@ -253,42 +253,58 @@ def _prepend_system(system: str, messages: list[dict[str, Any]]) -> list[dict[st
     return out
 
 
-def _to_anthropic_message(m: dict[str, Any]) -> dict[str, Any]:
-    """Converte mensagem OpenAI-like → Anthropic.
+def _to_anthropic_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Converte lista de mensagens OpenAI-like → Anthropic.
 
-    OpenAI usa role=tool com tool_call_id; Anthropic usa role=user com
-    content=[tool_result]. Tool calls do assistant também ficam embutidas
-    como blocks content em vez de array separado.
+    Diferenças importantes do formato Anthropic:
+    - role="tool" (com tool_call_id) vira role="user" com content=[tool_result].
+    - Tool calls do assistant ficam embutidas como blocks no content em vez
+      de array separado.
+    - Múltiplos tool_results de um único turno de tool_use DEVEM ser
+      empacotados num único user message com múltiplos content blocks. Se
+      forem enviados em messages user separados, a API rejeita com
+      "tool_use ids were found without tool_result blocks immediately after".
+      Por isso colapsamos role="tool" consecutivos.
     """
-    role = m.get("role")
-    if role == "tool":
-        return {
-            "role": "user",
-            "content": [
+    out: list[dict[str, Any]] = []
+    pending_tool_results: list[dict[str, Any]] = []
+
+    def flush_tool_results() -> None:
+        if pending_tool_results:
+            out.append({"role": "user", "content": list(pending_tool_results)})
+            pending_tool_results.clear()
+
+    for m in messages:
+        role = m.get("role")
+        if role == "tool":
+            pending_tool_results.append(
                 {
                     "type": "tool_result",
                     "tool_use_id": m.get("tool_call_id") or "",
                     "content": m.get("content") or "",
                 }
-            ],
-        }
-    if role == "assistant":
-        blocks: list[dict[str, Any]] = []
-        text = m.get("content") or ""
-        if text:
-            blocks.append({"type": "text", "text": text})
-        for tc in m.get("tool_calls") or []:
-            blocks.append(
-                {
-                    "type": "tool_use",
-                    "id": tc.get("id"),
-                    "name": tc.get("name"),
-                    "input": tc.get("input") or {},
-                }
             )
-        return {"role": "assistant", "content": blocks or text}
-    # user, etc.
-    return {"role": role or "user", "content": m.get("content") or ""}
+            continue
+        flush_tool_results()
+        if role == "assistant":
+            blocks: list[dict[str, Any]] = []
+            text = m.get("content") or ""
+            if text:
+                blocks.append({"type": "text", "text": text})
+            for tc in m.get("tool_calls") or []:
+                blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": tc.get("id"),
+                        "name": tc.get("name"),
+                        "input": tc.get("input") or {},
+                    }
+                )
+            out.append({"role": "assistant", "content": blocks or text})
+        else:
+            out.append({"role": role or "user", "content": m.get("content") or ""})
+    flush_tool_results()
+    return out
 
 
 def _to_anthropic_tool(t: dict[str, Any]) -> dict[str, Any]:

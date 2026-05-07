@@ -27,7 +27,7 @@ from core.event_bus import EventBus, EventType
 from core.llm_client import LLMClient, LLMError, ToolCall
 from core.vault import Vault
 
-MAX_TOKENS = 1024
+MAX_TOKENS = 600
 MAX_TOOL_TURNS = 8
 DEFAULT_TEMPERATURE = 0.2
 SESSION_TURNS_KEPT = 6  # últimos N turnos (user+assistant pairs) mantidos em RAM
@@ -61,6 +61,7 @@ class JarvisAgent:
         vault: Vault | None = None,
         temperature: float = DEFAULT_TEMPERATURE,
         event_bus: EventBus | None = None,
+        skills_provider: Callable[[], str] | None = None,
     ) -> None:
         self._base_system_prompt = system_prompt
         self._llm = llm_client
@@ -69,6 +70,9 @@ class JarvisAgent:
         self._vault = vault
         self._temperature = temperature
         self._event_bus = event_bus
+        # Provider em vez de string fixa: mudanças na curadoria refletem
+        # imediatamente sem precisar reinstanciar o agente.
+        self._skills_provider = skills_provider
         # Sessão: deque de turnos completos (cada turno = lista de mensagens).
         self._session: deque[list[dict[str, Any]]] = deque(maxlen=SESSION_TURNS_KEPT)
 
@@ -195,6 +199,21 @@ class JarvisAgent:
                     "Contexto persistente sobre a Senhora e seus projetos "
                     "(do vault local). Use como referência ao responder.\n\n"
                     + ctx
+                )
+        if self._skills_provider is not None:
+            try:
+                summary = (self._skills_provider() or "").strip()
+            except Exception as e:
+                print(f"[agent] skills_provider falhou: {e!r}")
+                summary = ""
+            if summary:
+                # Só awareness — você não executa essas skills, só sabe que a
+                # Senhora as tem disponíveis no terminal Claude Code.
+                parts.append(
+                    "Skills e slash commands que a Senhora tem instalados no Claude Code "
+                    "(você NÃO os executa — apenas pode mencioná-los pelo nome quando "
+                    "ela perguntar o que tem disponível): "
+                    + summary
                 )
         if mode_key and mode_key in THINKING_MODES:
             parts.append(THINKING_MODES[mode_key])
