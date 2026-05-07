@@ -36,6 +36,7 @@ class EventType(str, Enum):
     AGENT_TOOL_RESULT = "agent_tool_result"     # data: {tool, result_preview, call_id, error}
     AGENT_TURN_ENDED = "agent_turn_ended"       # data: {assistant_text, tools_used}
     JARVIS_INITIATIVE = "jarvis_initiative"     # data: {label, text} — Jarvis fala primeiro
+    SKILLS_UPDATED = "skills_updated"           # data: {} — UI deve recarregar /api/skills
     LOG = "log"  # mensagem genérica
 
 

@@ -2,6 +2,18 @@ user:
   name: "Bárbara"
   honorific: "Senhora"
 
+terminal:
+  # Terminal usado quando o Jarvis abre uma janela interativa (ex: rodar uma
+  # skill do Claude Code). Valores aceitos:
+  #   auto       → wt se disponível, senão cmd. Default seguro.
+  #   wt         → Windows Terminal (pré-preenche o comando).
+  #   cmd        → cmd.exe clássico (pré-preenche o comando).
+  #   powershell → PowerShell (pré-preenche o comando).
+  #   warp       → Warp via URI scheme. Limitação: não aceita comando inicial,
+  #                então o Jarvis abre só no diretório e devolve o comando
+  #                pra colar.
+  preferred: "warp"
+
 narrator:
   # Engines disponíveis: "edge_tts" (grátis, neural Microsoft) | "fish_audio" (pago)
   engine: "fish_audio"
@@ -103,6 +115,21 @@ commands:
     action: greet
     params: {}
 tools:
+  claude_code:
+    # Permite o agente abrir o Claude Code (CLI) num projeto específico com um
+    # comando slash já pré-preenchido. Skills do Claude Code são interativas e
+    # precisam rodar dentro de um diretório que tenha as definições instaladas
+    # (`.claude/commands/<plugin>/`). O Jarvis pergunta qual projeto usar
+    # quando você falar "rode /softflow:concept na MPC-158" e houver mais de
+    # uma opção (ou cadastrar nenhuma).
+    enabled: true
+    projects:
+      soft-suite-api: C:\Softplan\soft-suite-api
+    # Exemplo:
+    # projects:
+    #   softflow: "C:/Users/barbara.pacheco/Documents/algum-projeto-com-softflow"
+    #   jarvis: "~/Documents/jarvis"
+      softflow: C:\Softplan\Utils\softflow
   spotify:
     enabled: true
   code_review:
@@ -174,3 +201,10 @@ wake_word:
   # Liga escuta contínua pra acordar pelo nome "Jarvis". Mic fica sempre aberto.
   # Coexiste com push-to-talk; ambos disparam o mesmo fluxo de comando.
   enabled: true
+skills:
+  disabled:
+    - hp:dev
+    - hp:publish
+    - hp:qa
+    - hp:review
+    - hp:spec

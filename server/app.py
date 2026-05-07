@@ -11,6 +11,12 @@ Rotas:
 - GET  /api/mcps         → lista de servidores MCP + status
 - PUT  /api/mcps         → substitui a lista inteira de MCPs
 - POST /api/mcps/reload  → reconecta os servidores
+- GET  /api/skills       → catálogo de skills/commands do Claude Code (anotado)
+- POST /api/skills/toggle→ ativa/desativa uma skill no awareness do agente
+- GET  /api/claude-code/projects → projetos cadastrados pra abrir Claude Code (CLI)
+- PUT  /api/claude-code/projects → substitui o dict inteiro de projetos
+- GET  /api/terminal     → terminal preferido pra janelas interativas
+- PUT  /api/terminal     → atualiza terminal.preferred
 - GET  /api/status       → flags de capabilities (stt/agent/wake_word/etc.)
 """
 
@@ -40,6 +46,7 @@ from core.config_manager import ConfigManager
 from core.event_bus import Event, EventBus, EventType
 from core.mcp_manager import MCPManager, MCPServerConfig
 from core.secrets_manager import SecretsManager
+from core.terminal import VALID_TERMINALS, normalize_preferred
 from core.vault import Vault
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
@@ -91,6 +98,21 @@ class VaultApplyIn(BaseModel):
     file: str
     action: str  # "append" | "replace" | "create"
     content: str
+
+
+class SkillToggleIn(BaseModel):
+    name: str
+    enabled: bool
+
+
+class ClaudeProjectsIn(BaseModel):
+    # Mapeia chave amigável → caminho. Substitui o dict inteiro (chaves
+    # antigas que não estiverem aqui são REMOVIDAS).
+    projects: dict[str, str]
+
+
+class TerminalIn(BaseModel):
+    preferred: str
 
 
 class SecretsUpdateIn(BaseModel):
@@ -267,6 +289,123 @@ def create_app(
     async def commands_catalog() -> dict:
         registry = tool_registry_provider() if tool_registry_provider else {}
         return {"tools": serialize_catalog(registry)}
+
+    # ---------- Skills (Claude Code awareness) ----------
+
+    @app.get("/api/skills")
+    async def list_skills() -> dict:
+        from core.skill_catalog import annotate, discover_skills
+
+        entries = await asyncio.to_thread(discover_skills)
+        disabled: set[str] = set()
+        if config_manager is not None:
+            cfg = await asyncio.to_thread(config_manager.load)
+            disabled = set((cfg.get("skills") or {}).get("disabled") or [])
+        items = annotate(entries, disabled=disabled)
+        return {
+            "skills": items,
+            "total": len(items),
+            "enabled_count": sum(1 for x in items if x["enabled"]),
+        }
+
+    @app.post("/api/skills/toggle")
+    async def toggle_skill(payload: SkillToggleIn) -> dict:
+        if config_manager is None:
+            raise HTTPException(status_code=503, detail="config indisponível")
+        cfg = await asyncio.to_thread(config_manager.load)
+        skills_cfg = (cfg.get("skills") or {})
+        disabled = set(skills_cfg.get("disabled") or [])
+        if payload.enabled:
+            disabled.discard(payload.name)
+        else:
+            disabled.add(payload.name)
+        # Lista ordenada pra YAML estável (diff amigável).
+        new_disabled = sorted(disabled)
+        await asyncio.to_thread(
+            config_manager.patch, {"skills": {"disabled": new_disabled}}
+        )
+        # Avisa a UI pra recarregar — qualquer cliente conectado redesenha.
+        try:
+            event_bus.publish(EventType.SKILLS_UPDATED)
+        except Exception as e:
+            print(f"[skills] falha emitindo skills_updated: {e!r}")
+        return {"ok": True, "name": payload.name, "enabled": payload.enabled}
+
+    # ---------- Claude Code (projetos cadastrados) ----------
+
+    @app.get("/api/claude-code/projects")
+    async def list_claude_projects() -> dict:
+        if config_manager is None:
+            return {"projects": []}
+        cfg = await asyncio.to_thread(config_manager.load)
+        projects_cfg = (
+            ((cfg.get("tools") or {}).get("claude_code") or {}).get("projects") or {}
+        )
+        items = []
+        for name, raw in projects_cfg.items():
+            resolved = Path(str(raw)).expanduser()
+            items.append(
+                {
+                    "name": name,
+                    "path": str(raw),
+                    "resolved_path": str(resolved),
+                    "exists": resolved.is_dir(),
+                }
+            )
+        return {"projects": items}
+
+    @app.put("/api/claude-code/projects")
+    async def put_claude_projects(payload: ClaudeProjectsIn) -> dict:
+        if config_manager is None:
+            raise HTTPException(status_code=503, detail="config indisponível")
+        # Valida nomes: sem strings vazias / espaços só.
+        cleaned: dict[str, str] = {}
+        for raw_name, raw_path in payload.projects.items():
+            name = (raw_name or "").strip()
+            path = (raw_path or "").strip()
+            if not name or not path:
+                continue
+            cleaned[name] = path
+        # _deep_merge interpreta None como "delete key" — usamos isso pra
+        # remover projetos que sumiram do payload, garantindo replace total
+        # do dict (em vez do merge default).
+        cfg = await asyncio.to_thread(config_manager.load)
+        old = (
+            ((cfg.get("tools") or {}).get("claude_code") or {}).get("projects") or {}
+        )
+        deletions = {name: None for name in old if name not in cleaned}
+        await asyncio.to_thread(
+            config_manager.patch,
+            {"tools": {"claude_code": {"projects": {**deletions, **cleaned}}}},
+        )
+        return {"ok": True, "count": len(cleaned)}
+
+    # ---------- Terminal preferido ----------
+
+    @app.get("/api/terminal")
+    async def get_terminal() -> dict:
+        if config_manager is None:
+            return {"preferred": "auto", "options": list(VALID_TERMINALS)}
+        cfg = await asyncio.to_thread(config_manager.load)
+        preferred = normalize_preferred(
+            (cfg.get("terminal") or {}).get("preferred")
+        )
+        return {"preferred": preferred, "options": list(VALID_TERMINALS)}
+
+    @app.put("/api/terminal")
+    async def put_terminal(payload: TerminalIn) -> dict:
+        if config_manager is None:
+            raise HTTPException(status_code=503, detail="config indisponível")
+        pref = (payload.preferred or "").strip().lower()
+        if pref not in VALID_TERMINALS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"preferred inválido: {pref!r}. opções: {list(VALID_TERMINALS)}",
+            )
+        await asyncio.to_thread(
+            config_manager.patch, {"terminal": {"preferred": pref}}
+        )
+        return {"ok": True, "preferred": pref}
 
     # ---------- MCPs ----------
 

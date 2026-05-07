@@ -159,21 +159,36 @@
           </form>
           </div><!-- /.reactor-stage -->
 
-          <!-- Coluna direita: VAULT OVERVIEW -->
-          <aside class="panel panel-gold home-overview">
-            <div class="panel-header"><span class="panel-title">Vault overview</span></div>
-            <div class="overview-stats">
-              <div class="stat-pill"><span class="stat-num" id="ovNotes">—</span><span class="stat-key">notas</span></div>
-              <div class="stat-pill"><span class="stat-num" id="ovLinks">—</span><span class="stat-key">links</span></div>
-              <div class="stat-pill"><span class="stat-num" id="ovToday">—</span><span class="stat-key">hoje</span></div>
-              <div class="stat-pill"><span class="stat-num" id="ovWeek">—</span><span class="stat-key">7d</span></div>
-            </div>
-            <div class="overview-actions">
-              <button class="btn-cockpit gold" id="openObsidianBtn" type="button" title="Abre o vault no Obsidian (precisa de Open Folder As Vault feito antes)">Abrir Obsidian</button>
-              <button class="btn-cockpit" id="openExplorerBtn" type="button" title="Abrir pasta no Explorador">Pasta</button>
-            </div>
-            <div class="overview-path" id="ovPath"></div>
-          </aside>
+          <!-- Coluna direita: VAULT OVERVIEW + SKILLS -->
+          <div class="home-right">
+            <aside class="panel panel-gold home-overview">
+              <div class="panel-header"><span class="panel-title">Vault overview</span></div>
+              <div class="overview-stats">
+                <div class="stat-pill"><span class="stat-num" id="ovNotes">—</span><span class="stat-key">notas</span></div>
+                <div class="stat-pill"><span class="stat-num" id="ovLinks">—</span><span class="stat-key">links</span></div>
+                <div class="stat-pill"><span class="stat-num" id="ovToday">—</span><span class="stat-key">hoje</span></div>
+                <div class="stat-pill"><span class="stat-num" id="ovWeek">—</span><span class="stat-key">7d</span></div>
+              </div>
+              <div class="overview-actions">
+                <button class="btn-cockpit gold" id="openObsidianBtn" type="button" title="Abre o vault no Obsidian (precisa de Open Folder As Vault feito antes)">Abrir Obsidian</button>
+                <button class="btn-cockpit" id="openExplorerBtn" type="button" title="Abrir pasta no Explorador">Pasta</button>
+              </div>
+              <div class="overview-path" id="ovPath"></div>
+            </aside>
+
+            <aside class="panel home-skills">
+              <div class="panel-header">
+                <span class="panel-title">Skills</span>
+                <span class="panel-meta" id="homeSkillsMeta">—</span>
+              </div>
+              <div class="skill-chips" id="homeSkillsChips">
+                <div class="skill-chips-empty">Carregando…</div>
+              </div>
+              <div class="overview-actions">
+                <button class="btn-cockpit" id="manageSkillsBtn" type="button" title="Gerenciar quais skills o Jarvis conhece">Gerenciar</button>
+              </div>
+            </aside>
+          </div>
         </div><!-- /.home-cockpit -->
       </section>
 
@@ -347,6 +362,7 @@
           <button class="settings-tab" data-stab="secrets" role="tab" aria-selected="false">Credenciais</button>
           <button class="settings-tab" data-stab="voice" role="tab" aria-selected="false">Voz &amp; Comandos</button>
           <button class="settings-tab" data-stab="agents" role="tab" aria-selected="false">Agentes (MCPs)</button>
+          <button class="settings-tab" data-stab="skills" role="tab" aria-selected="false">Skills</button>
           <button class="settings-tab" data-stab="motor" role="tab" aria-selected="false">Motor</button>
           <button class="settings-tab" data-stab="tools" role="tab" aria-selected="false">Tools</button>
         </div>
@@ -361,6 +377,31 @@
                 </label>
                 <label>Tratamento
                   <input type="text" data-cfg="user.honorific"/>
+                </label>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header">
+                <span class="panel-title">Terminal</span>
+                <span class="panel-meta" id="terminalMeta">—</span>
+              </div>
+              <p class="card-hint">
+                Terminal usado quando o Jarvis abre uma janela interativa
+                (ex: rodar uma skill do Claude Code num projeto).
+                <strong>Warp</strong> tem limitação no Windows: abre só no
+                diretório, sem pré-preencher o comando — o Jarvis devolve
+                a linha pra colar.
+              </p>
+              <div class="form-grid">
+                <label>Preferência
+                  <select id="terminalSelect">
+                    <option value="auto">auto (wt → cmd)</option>
+                    <option value="wt">Windows Terminal (wt)</option>
+                    <option value="cmd">cmd.exe</option>
+                    <option value="powershell">PowerShell</option>
+                    <option value="warp">Warp</option>
+                  </select>
                 </label>
               </div>
             </div>
@@ -534,6 +575,48 @@
                   <button class="btn-ghost" id="mcpReload" type="button">Recarregar conexões</button>
                 </div>
               </details>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-pane" data-spane="skills">
+          <div class="settings-grid">
+            <div class="panel panel-wide">
+              <div class="panel-header">
+                <span class="panel-title">Projetos do Claude Code</span>
+                <span class="panel-meta" id="ccProjectsMeta">—</span>
+              </div>
+              <p class="card-hint">
+                Diretórios onde o Jarvis pode abrir o Claude Code pra rodar
+                skills/slash commands. Quando você falar "rode /softflow:concept
+                na MPC-158", ele pergunta qual projeto usar (ou usa direto se
+                houver só um cadastrado). Skills só rodam onde o repo tiver
+                elas instaladas (<code>.claude/commands/&lt;plugin&gt;/</code>).
+              </p>
+              <div class="cc-projects-list" id="ccProjectsList"></div>
+              <div class="cc-projects-add">
+                <input type="text" id="ccProjName" placeholder="apelido (ex: softflow)" autocomplete="off"/>
+                <input type="text" id="ccProjPath" placeholder="C:/.../caminho ou ~/Documents/repo" autocomplete="off"/>
+                <button class="btn-primary" id="ccProjAdd" type="button">Adicionar</button>
+              </div>
+            </div>
+
+            <div class="panel panel-wide">
+              <div class="panel-header">
+                <span class="panel-title">Skills do Claude Code</span>
+                <span class="panel-meta" id="skillsPaneMeta">—</span>
+              </div>
+              <p class="card-hint">
+                O Jarvis lê todas as skills e slash commands instalados em
+                <code>~/.claude/skills/</code>, <code>~/.claude/commands/</code>
+                e plugins. Desativadas aqui não entram no awareness do agente —
+                ele não vai citá-las quando você perguntar "o que tenho?".
+              </p>
+              <div class="skills-controls">
+                <input type="search" id="skillsSearch" placeholder="Buscar por nome ou descrição..." autocomplete="off"/>
+                <button class="btn-ghost" id="skillsReloadBtn" type="button" title="Re-escanear o disco">Re-escanear</button>
+              </div>
+              <div class="skills-list" id="skillsList"></div>
             </div>
           </div>
         </div>

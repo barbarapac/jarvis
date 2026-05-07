@@ -38,6 +38,11 @@ from core.voice_command import VoiceCommander
 from core.wake_word import WakeWordListener
 from core.workspace import WorkspaceManager
 from server.app import create_app
+from tools.claude_code import (
+    ClaudeCodeTool,
+    build_claude_code_anthropic_tools,
+    build_claude_code_caller,
+)
 from tools.code_review import CodeReviewTool, project_configs_from_yaml
 from tools.gitlab import GitLabTool
 from tools.spotify import SpotifyTool
@@ -255,6 +260,83 @@ def build_synthesizer(config: dict, vault: Vault | None, llm_client):
         return None
 
 
+def build_skills_provider(config_manager: ConfigManager | None):
+    """Provider que descobre skills locais e aplica curadoria do config.
+
+    Reler em todo turno é barato (config é dezenas de KB, glob de SKILL.md
+    poucas dezenas de arquivos). Em troca, toggles na UI refletem na hora.
+    """
+    try:
+        from core.skill_catalog import discover_skills, format_for_prompt
+    except Exception as e:
+        print(f"[jarvis] catálogo de skills indisponível: {e!r}", file=sys.stderr)
+        return None
+
+    # Anuncia uma vez no boot pra ficar visível no log.
+    try:
+        n = len(discover_skills())
+        if n:
+            print(f"[jarvis] catálogo: {n} skills/commands indexados.")
+    except Exception:
+        pass
+
+    def provider() -> str:
+        try:
+            entries = discover_skills()
+        except Exception as e:
+            print(f"[jarvis] falha redescobrindo skills: {e!r}")
+            return ""
+        disabled: set[str] = set()
+        if config_manager is not None:
+            try:
+                cfg = config_manager.load()
+                disabled = set((cfg.get("skills") or {}).get("disabled") or [])
+            except Exception as e:
+                print(f"[jarvis] falha lendo skills.disabled: {e!r}")
+        return format_for_prompt(entries, disabled=disabled)
+
+    return provider
+
+
+def build_claude_code(
+    config: dict, config_manager: ConfigManager
+) -> ClaudeCodeTool | None:
+    """Constrói a tool de integração com Claude Code se habilitada no config.
+
+    O dict de projetos é lido a cada chamada via `config_manager`, então
+    cadastros feitos pela UI refletem na hora sem precisar reiniciar.
+    Sem projetos cadastrados a tool ainda existe: ela informa o agent que
+    precisa que a Senhora cadastre um diretório, e ele propaga a mensagem.
+    """
+    cfg = (config.get("tools") or {}).get("claude_code") or {}
+    if not cfg.get("enabled"):
+        return None
+
+    def projects_provider() -> dict[str, str]:
+        try:
+            current = config_manager.load()
+        except Exception as e:
+            print(f"[claude_code] falha relendo config: {e!r}", file=sys.stderr)
+            return {}
+        return (
+            ((current.get("tools") or {}).get("claude_code") or {}).get("projects")
+            or {}
+        )
+
+    def terminal_provider() -> str:
+        try:
+            current = config_manager.load()
+        except Exception as e:
+            print(f"[claude_code] falha relendo config (terminal): {e!r}", file=sys.stderr)
+            return "auto"
+        return str((current.get("terminal") or {}).get("preferred") or "auto")
+
+    return ClaudeCodeTool(
+        projects_provider=projects_provider,
+        terminal_provider=terminal_provider,
+    )
+
+
 def build_agent(
     config: dict,
     persona: Persona,
@@ -262,8 +344,18 @@ def build_agent(
     vault: Vault | None,
     event_bus: EventBus,
     llm_client,
+    config_manager: ConfigManager | None = None,
+    *,
+    native_tool_specs: list[dict] | None = None,
+    native_tool_caller=None,
 ):
-    """Constrói o agente com o llm_client compartilhado. None se LLM indisponível."""
+    """Constrói o agente com o llm_client compartilhado. None se LLM indisponível.
+
+    `native_tool_specs` + `native_tool_caller` permitem expor tools
+    implementadas em Python (não-MCP) ao agent. O caller deve retornar
+    `None` quando o nome não casar com nenhuma tool nativa, sinalizando
+    fallback pro MCP manager.
+    """
     if llm_client is None:
         print("[jarvis] agente desativado: LLM indisponível.", file=sys.stderr)
         return None
@@ -274,12 +366,22 @@ def build_agent(
         return None
 
     def tools_provider() -> list[dict]:
-        return mcp_manager.list_tools_for_anthropic() if mcp_manager else []
+        mcp_tools = mcp_manager.list_tools_for_anthropic() if mcp_manager else []
+        return mcp_tools + list(native_tool_specs or [])
 
     def tool_caller(name: str, args: dict) -> str:
+        if native_tool_caller is not None:
+            result = native_tool_caller(name, args)
+            if result is not None:
+                return result
         if mcp_manager is None:
             return "[mcp não disponível]"
         return mcp_manager.call_tool(name, args)
+
+    # Awareness das skills/commands locais do Claude Code. Provider lê a
+    # curadoria do config a cada turno (skills.disabled), então toggles
+    # da UI refletem imediatamente sem reiniciar o Jarvis.
+    skills_provider = build_skills_provider(config_manager)
 
     try:
         return JarvisAgent(
@@ -289,6 +391,7 @@ def build_agent(
             tool_caller=tool_caller,
             vault=vault,
             event_bus=event_bus,
+            skills_provider=skills_provider,
         )
     except Exception as e:
         print(f"[jarvis] agente falhou na inicialização: {e!r}", file=sys.stderr)
@@ -478,7 +581,24 @@ def main() -> int:
         pending_vault.append(vault)
     if synthesizer is not None:
         pending_synthesizer.append(synthesizer)
-    agent = build_agent(config, persona, mcp_manager, vault, event_bus, llm_client)
+    claude_code_tool = build_claude_code(config, config_manager)
+    if claude_code_tool is not None:
+        native_tool_specs = build_claude_code_anthropic_tools(claude_code_tool)
+        native_tool_caller = build_claude_code_caller(claude_code_tool)
+    else:
+        native_tool_specs = None
+        native_tool_caller = None
+    agent = build_agent(
+        config,
+        persona,
+        mcp_manager,
+        vault,
+        event_bus,
+        llm_client,
+        config_manager,
+        native_tool_specs=native_tool_specs,
+        native_tool_caller=native_tool_caller,
+    )
     if agent is not None:
         agent_invoker_lock = threading.Lock()
 
@@ -581,6 +701,9 @@ def main() -> int:
     if vault: capabilities.append(f"vault ({vault.root})")
     if agent: capabilities.append("agent")
     if briefing: capabilities.append("briefing matinal")
+    if claude_code_tool: capabilities.append(
+        f"claude code ({len(claude_code_tool.list_projects())} proj)"
+    )
     if mcp_manager: capabilities.append(f"mcp ({len(mcp_manager.list_status())})")
     if hotkey_listener: capabilities.append(f"push-to-talk ({hotkey_listener.combo})")
     if wake_listener: capabilities.append("wake-word (jarvis)")

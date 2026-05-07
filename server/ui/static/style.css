@@ -260,6 +260,20 @@ code {
 
 .big-reactor.speaking .core      { fill: url(#coreGrad); filter: drop-shadow(0 0 16px var(--gold)); }
 
+/* Pensando: pulso rápido em ciano, anéis acelerados, segmentos respirando.
+   Distinto do "working" (dourado) — "thinking" é cognitivo, "working" é I/O. */
+.big-reactor.thinking .core,
+.big-reactor.thinking .core-hot  { animation-duration: 1.0s; }
+.big-reactor.thinking .halo      { animation-duration: 1.2s; }
+.big-reactor.thinking .ring-mid  { animation-duration: 4s; }
+.big-reactor.thinking .ring-inner{ animation-duration: 5s; }
+.big-reactor.thinking .segments .seg polygon {
+  animation-duration: 0.9s;
+  fill: rgba(0, 212, 255, 0.55);
+  stroke: var(--reactor);
+}
+.big-reactor.thinking .core      { filter: drop-shadow(0 0 18px var(--reactor-glow)); }
+
 .big-reactor.working .segments .seg polygon { fill: rgba(245, 196, 83, 0.35); stroke: var(--gold); }
 .big-reactor.working .core { filter: drop-shadow(0 0 20px var(--gold)); }
 
@@ -1496,6 +1510,177 @@ button:disabled {
   align-self: stretch;
 }
 
+/* Coluna direita do cockpit: Vault overview + Skills empilhados. */
+.home-right {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-self: stretch;
+}
+
+/* Painel Skills na home — chips ciano com nome.
+   Versão compacta: tooltip cobre a descrição, sem listar tudo. */
+.home-skills .skill-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.skill-chips-empty {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+}
+.skill-chip {
+  display: inline-block;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: var(--hud-mono);
+  letter-spacing: 0.5px;
+  border: 1px solid var(--reactor);
+  color: var(--reactor);
+  background: rgba(0, 212, 255, 0.08);
+  border-radius: 3px;
+  cursor: default;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.skill-chip:hover {
+  background: rgba(0, 212, 255, 0.18);
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.4);
+}
+.skill-chip-command {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: rgba(245, 196, 83, 0.08);
+}
+.skill-chip-command:hover {
+  background: rgba(245, 196, 83, 0.18);
+  box-shadow: 0 0 8px rgba(245, 196, 83, 0.4);
+}
+.skill-chip-plugin {
+  border-color: #c084fc;
+  color: #c084fc;
+  background: rgba(192, 132, 252, 0.08);
+}
+.skill-chip-plugin:hover {
+  background: rgba(192, 132, 252, 0.18);
+  box-shadow: 0 0 8px rgba(192, 132, 252, 0.4);
+}
+
+/* Sub-aba Skills nas Configurações — uma linha por skill com toggle. */
+.skills-controls {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+}
+.skills-controls input[type="search"] {
+  flex: 1;
+  padding: 6px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-family: var(--hud-mono);
+  font-size: 12px;
+  border-radius: 3px;
+}
+.skills-controls input[type="search"]:focus {
+  outline: none;
+  border-color: var(--reactor);
+  box-shadow: 0 0 0 1px var(--reactor-soft);
+}
+.skills-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.skill-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--reactor);
+  border-radius: 3px;
+  transition: border-color 0.15s, opacity 0.15s;
+}
+.skill-row.disabled {
+  opacity: 0.55;
+  border-left-color: var(--line);
+}
+.skill-row-skill    { border-left-color: var(--reactor); }
+.skill-row-command  { border-left-color: var(--gold); }
+.skill-row-plugin   { border-left-color: #c084fc; }
+.skill-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.skill-row-name {
+  font-family: var(--hud-mono);
+  font-weight: 700;
+  color: var(--text);
+  font-size: 13px;
+  letter-spacing: 0.5px;
+}
+.skill-row-desc {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Toggle estilo iOS — checkbox custom. */
+.skill-toggle {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 20px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.skill-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.skill-toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  transition: background 0.2s, border-color 0.2s;
+}
+.skill-toggle-slider::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: var(--muted);
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+.skill-toggle input:checked + .skill-toggle-slider {
+  background: rgba(0, 212, 255, 0.2);
+  border-color: var(--reactor);
+}
+.skill-toggle input:checked + .skill-toggle-slider::before {
+  transform: translateX(18px);
+  background: var(--reactor);
+  box-shadow: 0 0 6px var(--reactor-glow);
+}
+.skill-toggle input:disabled + .skill-toggle-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .home-systems .sys-clock {
   margin-bottom: 10px;
   padding-bottom: 10px;
@@ -2067,3 +2252,73 @@ button:disabled {
 .settings-pane { display: none; }
 .settings-pane.active { display: block; }
 .settings-pane .settings-grid { margin-top: 0; }
+
+/* ============================================================
+   Projetos do Claude Code (settings > Skills)
+   ============================================================ */
+
+.cc-projects-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.cc-projects-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  border: 1px dashed var(--line);
+  border-radius: 3px;
+}
+.cc-project-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--gold);
+  border-radius: 3px;
+}
+.cc-project-row.missing { border-left-color: var(--muted); opacity: 0.85; }
+.cc-project-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cc-project-name {
+  font-family: var(--hud-mono);
+  font-weight: 700;
+  color: var(--text);
+  font-size: 13px;
+  letter-spacing: 0.5px;
+}
+.cc-project-path {
+  font-family: var(--hud-mono);
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-project-status { font-size: 11px; white-space: nowrap; }
+.cc-project-status.ok { color: var(--reactor); }
+.cc-project-status.missing { color: var(--gold); }
+.cc-projects-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.cc-projects-add input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--hud-mono);
+  font-size: 12px;
+}
+.cc-projects-add input:focus {
+  outline: none;
+  border-color: var(--reactor);
+  box-shadow: 0 0 0 1px var(--reactor-soft);
+}

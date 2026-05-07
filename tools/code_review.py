@@ -9,6 +9,7 @@ Roda em thread separada e avisa via narrator.
 
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 import threading
@@ -19,6 +20,10 @@ from typing import Optional
 from core.narrator import SpeakingNarrator
 from core.persona import Persona
 from core.workspace import WorkspaceError, WorkspaceManager
+
+# Não vazar a API key do cérebro pro `claude` CLI — senão dispara "Auth conflict"
+# entre o token claude.ai e a key direta da Anthropic.
+_BRAIN_ONLY_ENV_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 
 
 @dataclass(frozen=True)
@@ -120,6 +125,7 @@ class CodeReviewTool:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                env={k: v for k, v in os.environ.items() if k not in _BRAIN_ONLY_ENV_VARS},
             )
 
             if result.returncode == 0:
